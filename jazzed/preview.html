@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MYTY Logo Animation</title>
+<style>
+  :root { --bg: #0b0f1a; --fg: #eef0f6; --muted: #9aa3b8; }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; display: grid; gap: 28px; }
+  h2 { font-size: 15px; margin: 0 0 8px; } p { margin: 0 0 8px; color: var(--muted); }
+  img, video, .lottie { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 8px; }
+  .checker { background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 24px 24px; }
+</style>
+</head>
+<body>
+<main>
+  <section><h2>Animated SVG</h2><p>myty-logo.svg: vector, no JavaScript, works as a plain &lt;img&gt;.</p><img src="myty-logo.svg" alt="MYTY logo animation"></section>
+  <section><h2>Lottie (transparent)</h2><p>myty-logo-transparent.json played with lottie-web.</p><div class="lottie checker" id="lottie"></div></section>
+  <section><h2>WebM with alpha</h2><p>myty-logo-transparent.webm: raster fallback for video tools and players.</p><video class="checker" src="myty-logo-transparent.webm" autoplay loop muted playsinline></video></section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie_svg.min.js"></script>
+<script>lottie.loadAnimation({ container: document.getElementById('lottie'), renderer: 'svg', loop: true, autoplay: true, path: 'myty-logo-transparent.json' });</script>
+</body>
+</html>
