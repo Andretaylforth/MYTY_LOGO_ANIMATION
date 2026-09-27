@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MYTY Logo Original</title>
+<style>
+  body { margin: 0; padding: 24px 16px; background: #0b0f1a; color: #eef0f6; font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; display: grid; gap: 28px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .box { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; }
+  .crop { width: 160px; aspect-ratio: 185 / 435; background: #002A8C; border-radius: 8px; }
+  .checker { background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 24px 24px; }
+  button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 0; cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <button id="replay">Replay</button>
+  <section><h2>Original MP4</h2><video class="box" src="../Logo%20Anim%2030018-0090-1.mp4" muted playsinline></video></section>
+  <section><h2>myty-logo-original.json</h2><div class="box" id="a"></div></section>
+  <section><h2>myty-logo-original-transparent.json</h2><div class="box checker" id="b"></div></section>
+  <section><h2>myty-logo-original-cropped.json</h2><div class="crop" id="c"></div></section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie_light.min.js"></script>
+<script>
+  const make = (id, path) => lottie.loadAnimation({ container: document.getElementById(id), renderer: 'svg', loop: false, autoplay: false, path });
+  const anims = [make('a', 'myty-logo-original.json'), make('b', 'myty-logo-original-transparent.json'), make('c', 'myty-logo-original-cropped.json')];
+  const video = document.querySelector('video');
+  const play = () => { video.currentTime = 0; video.play(); anims.forEach(a => a.goToAndPlay(0, true)); };
+  document.getElementById('replay').onclick = play;
+  window.addEventListener('load', () => setTimeout(play, 300));
+</script>
+</body>
+</html>
