@@ -18,7 +18,7 @@ const server = http.createServer((q, r) => { const f = path.join(root, decodeURI
     for (const t of process.argv[3].split(',').map(Number)) fs.writeFileSync(path.join(root, 'stills', `t${t.toFixed(2)}.png`), await grab(t));
   } else {
     const { FPS, DURATION } = await p.evaluate(() => BOOT);
-    const ff = spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-i', '-', '-c:v', 'libx264', '-preset', 'slow', '-crf', '14', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', process.argv[2]], { stdio: ['pipe', 'inherit', 'inherit'] });
+    const ff = spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-i', '-', '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', process.argv[2]], { stdio: ['pipe', 'inherit', 'inherit'] });
     const n = Math.round(FPS * DURATION);
     for (let i = 0; i < n; i++) { const buf = await grab(i / FPS); if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r)); if (i % 150 === 0) console.log('frame', i, '/', n); }
     ff.stdin.end(); await new Promise(r => ff.on('close', r));
