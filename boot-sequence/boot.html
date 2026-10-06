@@ -17,7 +17,7 @@
 <script>
 // MYTY boot sequence: firmware POST -> blue logo boot -> lock screen -> sign-in.
 // Everything is a pure function of time t (seconds) so it can be rendered frame by frame.
-const W = 1920, H = 1080, FPS = 30, DURATION = 22.5;
+const W = 1920, H = 1080, FPS = 30, DURATION = 16;
 const BLUE = "#0a0192", WHITE = "#ffffff", BLACK = "#000000";
 const FONT = "Px437", FONT2 = "VCR";
 
@@ -27,12 +27,14 @@ const ctx = c.getContext("2d");
 function mk(w, h) { const k = document.createElement("canvas"); k.width = w; k.height = h; return k; }
 
 // ---- timeline -----------------------------------------------------------
+// BIOS screens are authored at normal speed and played back BIOS_SPEED times faster.
+const BIOS_SPEED = 1.7;
 const T = {
-  post: 0.9, postEnd: 6.6,      // 90s BIOS banner + memory test + drive detection
-  grid: 6.8, gridEnd: 12.2,     // system configuration grid + PCI listing
-  blue: 12.6, logo: 12.9,       // blue boot screen, Lottie starts
-  spin: 16.2,                   // spinner under the finished logo
-  impact: 19.2,                 // logo jumps, slams back to centre; end screen starts here
+  post: 0.5, postEnd: 0.5 + 5.7 / BIOS_SPEED,    // 90s BIOS banner + memory test + drive detection
+  grid: 4.0, gridEnd: 4.0 + 5.4 / BIOS_SPEED,    // system configuration grid + PCI listing
+  blue: 7.45, logo: 7.7,                         // blue boot screen, Lottie starts
+  spin: 7.7 + 73 / 24,                           // spinner starts the moment the logo animation ends
+  impact: 7.7 + 73 / 24 + 2.2,                   // logo jumps, slams back to centre; end screen starts here
 };
 
 // ---- helpers ------------------------------------------------------------
@@ -92,9 +94,9 @@ function icon(g, name, x, y, px, color = WHITE) {
 
 // Windows-style chasing dots, drawn as hard pixel squares.
 function spinner(g, cx, cy, t, r = 30, px = 7, color = WHITE) {
-  const period = 2.4;
+  const period = 1.7;
   for (let i = 0; i < 6; i++) {
-    const u = ((t - i * 0.11) % period + period) % period / period;
+    const u = ((t - i * 0.08) % period + period) % period / period;
     if (u > 0.82) continue; // gap between laps, like the real spinner
     const k = u / 0.82, a = -Math.PI / 2 + Math.PI * 2 * (k - Math.sin(Math.PI * 2 * k) * 0.13) * 1.25;
     g.fillStyle = color;
@@ -134,18 +136,53 @@ const LH = 37, FS = 28, X0 = 90;
 function scanlines(g) { g.fillStyle = "rgba(0,0,0,0.22)"; for (let j = 0; j < H; j += 4) g.fillRect(0, j, W, 2); }
 function typed(line, t, at, speed = 0.15) { return line.slice(0, Math.ceil(clamp((t - at) / speed) * line.length)); }
 
-// Replaces the "Energy Star" badge: dithered swoosh over the MYTY mark.
-function powerBadge(g, x, y) {
-  dither(g, x, y, 360, 230, 3, [BLACK, BLUE, "#4d7cff", WHITE], (s) => {
+// Replaces the "Energy Star" badge: half-size, animated 80s emblem, all dithered.
+// Spinning swoosh and dashed ring, an orbiting pixel satellite, the mark coin-flipping,
+// a scan beam sweeping down, and the odd slice glitch. `t` is real seconds.
+function rng(seed) { let v = (seed * 2654435761) >>> 0; return () => ((v = (v * 1664525 + 1013904223) >>> 0) / 4294967296); }
+function powerBadge(g, x, y, t) {
+  const bw = 200, bh = 130;
+  dither(g, x, y, bw, bh, 2, [BLACK, BLUE, "#4d7cff", WHITE], (s) => {
+    s.scale(0.5, 0.5); // drawn in a 400x260 space, shown at half size
+    const cx = 200, cy = 130;
+    // spinning swoosh
     s.lineWidth = 16; s.lineCap = "round";
-    const gr = s.createLinearGradient(20, 0, 340, 0); gr.addColorStop(0, "#2b45ff"); gr.addColorStop(1, "#ffffff");
-    s.strokeStyle = gr; s.beginPath(); s.arc(180, 175, 145, Math.PI * 1.08, Math.PI * 1.9); s.stroke();
-    // solid black behind the mark so its holes read as black circles, not the swoosh
-    s.fillStyle = "#000"; s.beginPath(); s.roundRect(296 - 36, 122 - 36, 72, 72, 14); s.fill();
-    logoPath(s, 296, 122, 74); s.fillStyle = "#fff"; s.fill("evenodd");
+    const a0 = t * 2.4, gr = s.createLinearGradient(cx - 120, 0, cx + 120, 0);
+    gr.addColorStop(0, "#2b45ff"); gr.addColorStop(1, "#ffffff");
+    s.strokeStyle = gr; s.beginPath(); s.arc(cx, cy, 112, a0, a0 + Math.PI * 1.25); s.stroke();
+    // counter-rotating dashed ring
+    s.lineWidth = 5; s.setLineDash([12, 16]); s.lineDashOffset = t * 60; s.strokeStyle = "#7f95ff";
+    s.beginPath(); s.arc(cx, cy, 90, 0, Math.PI * 2); s.stroke(); s.setLineDash([]);
+    // tilted orbit with a satellite
+    s.save(); s.translate(cx, cy); s.rotate(-0.35);
+    s.lineWidth = 3; s.strokeStyle = "rgba(160,180,255,0.8)"; s.beginPath(); s.ellipse(0, 0, 175, 42, 0, 0, Math.PI * 2); s.stroke();
+    const oa = t * 3.1, ox = Math.cos(oa) * 175, oy = Math.sin(oa) * 42;
+    s.fillStyle = "#fff"; s.fillRect(ox - 9, oy - 9, 18, 18);
+    s.restore();
+    // scan beam: brightens the rings it passes over and leaves dithered speckle on the black (drawn under the mark so its holes stay black)
+    const by = ((t * 0.8) % 1) * 360 - 50;
+    const band = s.createLinearGradient(0, by - 40, 0, by + 40);
+    band.addColorStop(0, "rgba(255,255,255,0)"); band.addColorStop(0.5, "rgba(255,255,255,0.75)"); band.addColorStop(1, "rgba(255,255,255,0)");
+    s.globalCompositeOperation = "source-atop"; s.fillStyle = band; s.fillRect(0, by - 40, 400, 80);
+    s.globalCompositeOperation = "source-over"; s.globalAlpha = 0.22; s.fillRect(0, by - 40, 400, 80); s.globalAlpha = 1;
+    // the mark, coin-flipping every 2.5 s, with solid black holes
+    const fp = (t % 2.5) / 0.6, flip = fp < 1 ? Math.cos(fp * Math.PI * 2) : 1;
+    s.save(); s.translate(cx, cy); s.scale(Math.abs(flip) < 0.06 ? 0.06 : flip, 1);
+    s.fillStyle = "#000"; s.beginPath(); s.roundRect(-38, -38, 76, 76, 15); s.fill();
+    logoPath(s, 0, 0, 78); s.fillStyle = "#fff"; s.fill("evenodd");
+    s.restore();
   });
-  text(g, "myty", x + 36, y + 100, 60, WHITE, FONT2);
-  text(g, "MODULAR POWER ALLY", x + 180, y + 196, 20, "#7f95ff", FONT, "center");
+  // slice glitch: a few strips of the emblem jump sideways for a couple of frames
+  const gp = t % 1.4;
+  if (gp > 1.25) {
+    const r = rng(Math.floor(t * 20));
+    for (let i = 0; i < 4; i++) {
+      const sy = y + Math.floor(r() * bh), sh = 4 + Math.floor(r() * 14), dx = Math.floor((r() - 0.5) * 40);
+      g.drawImage(c, x, sy, bw, sh, x + dx, sy, bw, sh);
+    }
+  }
+  text(g, "myty", x + bw / 2, y + bh + 4, 30, WHITE, FONT2, "center");
+  text(g, "MODULAR POWER ALLY", x + bw / 2, y + bh + 40, 14, "#7f95ff", FONT, "center");
 }
 
 const BIOS_LINES = [
@@ -182,7 +219,7 @@ function scenePOST(g, t) {
     y += LH;
   }
   if (Math.floor(t * 3) % 2 === 0) { g.fillStyle = WHITE; g.fillRect(X0 + 4, y + 26, 20, 5); }
-  powerBadge(g, W - 470, 50);
+  powerBadge(g, W - 300, 44, t / BIOS_SPEED);
   // "DEL" highlighted like the original
   g.font = `${FS}px "${FONT}"`; const pw = g.measureText("Press ").width, dw = g.measureText("DEL").width;
   text(g, "Press ", X0, H - 120, FS); text(g, "DEL", X0 + pw, H - 120, FS, "#7f95ff"); text(g, " to enter SETUP", X0 + pw + dw, H - 120, FS);
@@ -307,9 +344,9 @@ function renderAt(t) {
   const g = ctx;
   g.globalCompositeOperation = "source-over"; g.globalAlpha = 1;
   if (t < T.post) sceneBlack(g);
-  else if (t < T.postEnd) scenePOST(g, t - T.post);
+  else if (t < T.postEnd) scenePOST(g, (t - T.post) * BIOS_SPEED);
   else if (t < T.grid) sceneBlack(g);
-  else if (t < T.gridEnd) sceneGrid(g, t - T.grid);
+  else if (t < T.gridEnd) sceneGrid(g, (t - T.grid) * BIOS_SPEED);
   else if (t < T.blue) sceneBlack(g);
   else if (t < T.impact) sceneBlue(g, t);
   else sceneEnd(g, t - T.impact);
