@@ -17,7 +17,7 @@
 <script>
 // MYTY boot sequence: firmware POST -> blue logo boot -> lock screen -> sign-in.
 // Everything is a pure function of time t (seconds) so it can be rendered frame by frame.
-const W = 1920, H = 1080, FPS = 30, DURATION = 23.5;
+const W = 1920, H = 1080, FPS = 30, DURATION = 22.5;
 const BLUE = "#0a0192", WHITE = "#ffffff", BLACK = "#000000";
 const FONT = "Px437", FONT2 = "VCR";
 
@@ -127,15 +127,7 @@ function drawLogo(g, t) {
 }
 
 // ---- scenes ------------------------------------------------------------
-function sceneCRT(g, t) {
-  g.fillStyle = BLACK; g.fillRect(0, 0, W, H);
-  const k = clamp((t - 0.25) / 0.45);
-  if (k <= 0 || k >= 1) return;
-  const w = W * Math.sin(k * Math.PI), h = 4 + 30 * Math.pow(Math.sin(k * Math.PI), 6);
-  const gr = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, w / 2);
-  gr.addColorStop(0, "#fff"); gr.addColorStop(0.6, "rgba(77,124,255,0.8)"); gr.addColorStop(1, "rgba(77,124,255,0)");
-  g.fillStyle = gr; g.fillRect(W / 2 - w / 2, H / 2 - h / 2, w, h);
-}
+function sceneBlack(g) { g.fillStyle = BLACK; g.fillRect(0, 0, W, H); }
 
 // 90s BIOS look: 80x25 text mode feel, big Px437 type.
 const LH = 37, FS = 28, X0 = 90;
@@ -160,9 +152,10 @@ const BIOS_LINES = [
   [0.0, "#MYTY Modular BIOS v4.51MY, A Low Power Ally"],
   [0.0, "#Copyright (C) 1997-2026, MYTY Systems, Ltd."],
   [0.0, ""],
-  [0.3, "(MYTX97E) MYTY M430VX PCIset(TM)"],
+  [0.3, "(MYTX870E) MYTY X870E PCIset(TM)"],
+  [0.45, "NVIDIA GeForce RTX 5090 Founders Edition  32768MB GDDR7"],
   [0.3, ""],
-  [0.6, "MYTY-X CPU at 75MHz"],
+  [0.6, "AMD Ryzen 9 9900X3D 12-Core Processor at 4400MHz"],
   [0.8, "MEMTEST"],
   [2.6, ""],
   [2.7, "MYTY Plug and Play BIOS Extension  v1.0A"],
@@ -193,7 +186,7 @@ function scenePOST(g, t) {
   // "DEL" highlighted like the original
   g.font = `${FS}px "${FONT}"`; const pw = g.measureText("Press ").width, dw = g.measureText("DEL").width;
   text(g, "Press ", X0, H - 120, FS); text(g, "DEL", X0 + pw, H - 120, FS, "#7f95ff"); text(g, " to enter SETUP", X0 + pw + dw, H - 120, FS);
-  text(g, "10/06/97-M430VX,MYTY8669-2A59GH2BC-00", X0, H - 83, FS, "#9fb2ff");
+  text(g, "10/06/97-X870E,MYTY9900-2A59GH2BC-00", X0, H - 83, FS, "#9fb2ff");
   scanlines(g);
 }
 
@@ -215,12 +208,12 @@ function roundedGrid(g, x, y, w, h, p, title) {
 }
 
 const CFG_TOP = [
-  ["CPU Type", "MYTY-X", "Base Memory", "640K"],
-  ["Co-Processor", "Installed", "Extended Memory", "31744K"],
-  ["CPU Clock", "75MHz", "Cache Memory", "256K"],
+  ["CPU Type", "Ryzen 9 9900X3D", "Base Memory", "640K"],
+  ["Co-Processor", "12 Cores/24 Thr", "Extended Memory", "31744K"],
+  ["CPU Clock", "4400MHz", "Cache Memory", "131072K"],
 ];
 const CFG_BOT = [
-  ["Diskette Drive A", "1.44M, 3.5 in.", "Display Type", "EGA/VGA"],
+  ["Diskette Drive A", "1.44M, 3.5 in.", "Display Type", "RTX 5090 FE"],
   ["Diskette Drive B", "None", "Serial Port(s)", "3F8 2F8"],
   ["Pri. Master Disk", "LBA,Mode 4,2048MB", "Parallel Port(s)", "378"],
   ["Pri. Slave Disk", "CDROM,Mode 4", "EDO DRAM at Row(s)", "0 1 2 3"],
@@ -231,7 +224,7 @@ const PCI = [
   ["0", "7", "1", "4D59", "1230", "IDE Controller", "14"],
   ["0", "7", "2", "4D59", "7020", "Serial bus controller", "10"],
   ["0", "17", "0", "4D59", "0005", "Network controller", "11"],
-  ["0", "19", "0", "4D59", "8811", "Display controller", "NA"],
+  ["1", "0", "0", "10DE", "2B85", "Display controller", "NA"],
 ];
 
 function sceneGrid(g, t) {
@@ -279,14 +272,11 @@ function sceneGrid(g, t) {
 
 // Final logo geometry measured from the last Lottie frame.
 const LOGO = { cx: 959.5, cy: 539, s: 106 };
-const JUMP = 0.8; // seconds before T.impact the jump starts
-const bottom = LOGO.cy + LOGO.s / 2;
+const JUMP = 0.42; // seconds before T.impact the jump starts
+const LIFT = 210;
 
-// MYTY mark scaled around its base, so squashes stay planted on the "floor".
-function markAt(g, lift, sx, sy, scale = 1) {
-  g.save(); g.translate(LOGO.cx, bottom - lift); g.scale(sx * scale, sy * scale);
-  logoPath(g, 0, -LOGO.s / 2, LOGO.s); g.fillStyle = WHITE; g.fill("evenodd");
-  g.restore();
+function markAt(g, lift) {
+  logoPath(g, LOGO.cx, LOGO.cy - lift, LOGO.s); g.fillStyle = WHITE; g.fill("evenodd");
 }
 
 function sceneBlue(g, t) {
@@ -297,49 +287,30 @@ function sceneBlue(g, t) {
     if (t >= T.spin) spinner(g, W / 2, 820, t - T.spin);
     return;
   }
-  if (u < 0.18) {                       // anticipation squash
-    const q = Math.sin(Math.PI * u / 0.18);
-    markAt(g, 0, 1 + 0.18 * q, 1 - 0.24 * q);
-  } else if (u < 0.5) {                 // jump up, stretched
-    const k = (u - 0.18) / 0.32;
-    markAt(g, 190 * (1 - Math.pow(1 - k, 3)), 1 - 0.08 * (1 - k), 1 + 0.14 * (1 - k));
-  } else {                              // slam back down to the centre, stretching as it speeds up
-    const k = clamp((u - 0.5) / (JUMP - 0.5));
-    markAt(g, 190 * (1 - Math.pow(k, 2.4)), 1 - 0.12 * k, 1 + 0.25 * k);
-  }
+  if (u < 0.26) markAt(g, LIFT * (1 - Math.pow(1 - u / 0.26, 3)));        // shoot up, easing to a stop
+  else markAt(g, LIFT * (1 - Math.pow(clamp((u - 0.26) / (JUMP - 0.26)), 2))); // slam down, accelerating
 }
 
-// End screen: time and date on the logo blue. The slam lands, a shockwave rings out, the mark pops away.
+// End screen: time and date on the logo blue, coming in the instant the logo lands.
 function sceneEnd(g, v) {
   g.fillStyle = BLUE; g.fillRect(0, 0, W, H);
-  g.save();
-  g.translate(0, v < 0.5 ? 16 * Math.exp(-v * 10) * Math.cos(v * 70) : 0); // impact shake
-
-  const ring = clamp(v / 0.9), rr = 60 + (1 - Math.pow(1 - ring, 3)) * 1400;
-  if (ring < 1) {
-    g.strokeStyle = `rgba(255,255,255,${1 - ring})`; g.lineWidth = 2 + 10 * (1 - ring);
-    g.beginPath(); g.roundRect(LOGO.cx - rr, bottom - LOGO.s / 2 - rr, rr * 2, rr * 2, rr * 0.4); g.stroke();
-  }
-  if (v < 0.2) { const q = Math.sin(Math.PI * v / 0.2); markAt(g, 0, 1 + 0.32 * q, 1 - 0.38 * q); }
-  else if (v < 0.42) { const k = (v - 0.2) / 0.22; markAt(g, 0, 1, 1, 1 - k * k); }
-
-  const k = ease(clamp((v - 0.3) / 0.7)), dy = (1 - k) * 40;
+  const k = 1 - Math.pow(1 - clamp(v / 0.45), 3), dy = (1 - k) * 60;
   g.globalAlpha = k;
   text(g, "09:41", W / 2, 330 + dy, 150, WHITE, FONT, "center");
-  text(g, "TUESDAY, OCTOBER 6", W / 2, 505 + dy, 32, WHITE, FONT2, "center");
+  text(g, "TUESDAY, OCTOBER 6", W / 2, 505 + dy * 1.3, 32, WHITE, FONT2, "center");
   icon(g, "wifi", W - 230, H - 82, 4); icon(g, "battery", W - 150, H - 78, 4);
-  g.restore();
+  g.globalAlpha = 1;
 }
 
 // ---- master render --------------------------------------------------------
 function renderAt(t) {
   const g = ctx;
   g.globalCompositeOperation = "source-over"; g.globalAlpha = 1;
-  if (t < T.post) sceneCRT(g, t);
+  if (t < T.post) sceneBlack(g);
   else if (t < T.postEnd) scenePOST(g, t - T.post);
-  else if (t < T.grid) { g.fillStyle = BLACK; g.fillRect(0, 0, W, H); }
+  else if (t < T.grid) sceneBlack(g);
   else if (t < T.gridEnd) sceneGrid(g, t - T.grid);
-  else if (t < T.blue) { g.fillStyle = BLACK; g.fillRect(0, 0, W, H); }
+  else if (t < T.blue) sceneBlack(g);
   else if (t < T.impact) sceneBlue(g, t);
   else sceneEnd(g, t - T.impact);
 }
