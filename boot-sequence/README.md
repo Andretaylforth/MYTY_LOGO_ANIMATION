@@ -5,8 +5,8 @@
 1. CRT power-on
 2. 90s BIOS banner: MYTY mark, "Modular Power Ally" badge, memory test, IDE detection
 3. System Configurations grid and PCI device listing, with rounded double borders
-4. Blue boot screen with the live site's logo animation (`logo.json`, "ascii v2") and a pixel spinner
-5. Dithered lock screen, then sign-in, then "Welcome"
+4. Blue boot screen with the live site's logo animation (`logo.json`, "ascii v2"), a pixel spinner, then the logo squashes, jumps and grows into the lock screen
+5. Gradient lock screen, then sign-in, then "Welcome"
 
 Everything is drawn in `boot.html` as a function of time. Open it in a browser (via a local server) to preview it live.
 Re-render the video with:
