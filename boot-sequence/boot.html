@@ -27,47 +27,16 @@ const ctx = c.getContext("2d");
 function mk(w, h) { const k = document.createElement("canvas"); k.width = w; k.height = h; return k; }
 
 // ---- timeline -----------------------------------------------------------
-// BIOS screens are authored at normal speed and played back BIOS_SPEED times faster.
-const BIOS_SPEED = 1.7;
 const T = {
-  post: 0.5, postEnd: 0.5 + 5.7 / BIOS_SPEED,    // 90s BIOS banner + memory test + drive detection
-  grid: 4.0, gridEnd: 4.0 + 5.4 / BIOS_SPEED,    // system configuration grid + PCI listing
-  blue: 7.45, logo: 7.7,                         // blue boot screen, Lottie starts
-  spin: 7.7 + 73 / 24,                           // spinner starts the moment the logo animation ends
-  impact: 7.7 + 73 / 24 + 2.2,                   // logo jumps, slams back to centre; end screen starts here
+  term: 0.4, termEnd: 7.3,                       // sci-fi terminal: system -> kernel -> boot
+  blue: 7.5, logo: 7.75,                         // blue boot screen, Lottie starts
+  spin: 7.75 + 73 / 24,                          // spinner starts the moment the logo animation ends
+  impact: 7.75 + 73 / 24 + 2.2,                  // logo jumps, slams back to centre; end screen starts here
 };
 
 // ---- helpers ------------------------------------------------------------
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const ease = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-
-const BAYER = (() => {
-  const m = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
-             [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25], [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]];
-  return m.map(r => r.map(v => (v + 0.5) / 64));
-})();
-function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
-
-// Draw `fn` at 1/scale resolution, quantise its luminance onto `palette` with ordered dithering,
-// then blow it back up with hard pixels.
-const smallCache = {};
-function dither(target, x, y, w, h, scale, palette, fn) {
-  const sw = Math.ceil(w / scale), sh = Math.ceil(h / scale), key = sw + "x" + sh;
-  const k = smallCache[key] || (smallCache[key] = mk(sw, sh));
-  const kc = k.getContext("2d");
-  kc.clearRect(0, 0, sw, sh);
-  kc.save(); kc.scale(1 / scale, 1 / scale); fn(kc, w, h); kc.restore();
-  const img = kc.getImageData(0, 0, sw, sh), d = img.data, pal = palette.map(hex), n = pal.length - 1;
-  for (let j = 0; j < sh; j++) for (let i = 0; i < sw; i++) {
-    const o = (j * sw + i) * 4, b = BAYER[j & 7][i & 7];
-    if (d[o + 3] / 255 <= b * 0.98) { d[o + 3] = 0; continue; }
-    const L = (0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2]) / 255;
-    const v = L * n, base = Math.floor(v), idx = Math.min(n, base + ((v - base) > b ? 1 : 0)), p = pal[idx];
-    d[o] = p[0]; d[o + 1] = p[1]; d[o + 2] = p[2]; d[o + 3] = 255;
-  }
-  kc.putImageData(img, 0, 0);
-  target.save(); target.imageSmoothingEnabled = false; target.drawImage(k, 0, 0, sw, sh, x, y, sw * scale, sh * scale); target.restore();
-}
 
 // MYTY mark: rounded square with a 2x2 grid of round holes.
 function logoPath(g, cx, cy, s, hf = 1) {
@@ -131,181 +100,199 @@ function drawLogo(g, t) {
 // ---- scenes ------------------------------------------------------------
 function sceneBlack(g) { g.fillStyle = BLACK; g.fillRect(0, 0, W, H); }
 
-// 90s BIOS look: 80x25 text mode feel, big Px437 type.
-const LH = 37, FS = 28, X0 = 90;
+// ---- sci-fi terminal (replaces the BIOS screens) ---------------------------
+// One evolving screen: ASCII mark + header, tabbed content (SYSTEM -> KERNEL -> BOOT),
+// a SYSTEM CONFIGURATIONS panel and a BUS LOGGER panel. `t` is seconds since it appeared.
+const FG = "#d6d9e4", DIM = "#6c7186", ACC = "#4d7cff";
+const TS = 20, TL = 27;            // terminal type size and line height
 function scanlines(g) { g.fillStyle = "rgba(0,0,0,0.22)"; for (let j = 0; j < H; j += 4) g.fillRect(0, j, W, 2); }
 function typed(line, t, at, speed = 0.15) { return line.slice(0, Math.ceil(clamp((t - at) / speed) * line.length)); }
+function rng(seed) { let v = (seed * 2654435761) >>> 0; return () => ((v = (v * 1664525 + 1013904223) >>> 0) / 4294967296); }
 
-// Replaces the "Energy Star" badge: dithered swoosh + MYTY mark + wordmark, at half the original size.
-// Each element animates in once (`t` = real seconds since the BIOS screen appeared), then holds still.
-const easeOut = (x) => 1 - Math.pow(1 - clamp(x), 3);
-const easeBack = (x) => { x = clamp(x); const k = 2.2; return 1 + (k + 1) * Math.pow(x - 1, 3) + k * Math.pow(x - 1, 2); };
-function powerBadge(g, x, y, t) {
-  const bw = 180, bh = 115;
-  dither(g, x, y, bw, bh, 2, [BLACK, BLUE, "#4d7cff", WHITE], (s) => {
-    s.scale(0.5, 0.5); // drawn in the original 360x230 space
-    // swoosh draws on from its left end
-    const sw = easeOut((t - 0.05) / 0.55);
-    if (sw > 0) {
-      s.lineWidth = 16; s.lineCap = "round";
-      const gr = s.createLinearGradient(20, 0, 340, 0); gr.addColorStop(0, "#2b45ff"); gr.addColorStop(1, "#ffffff");
-      s.strokeStyle = gr; s.beginPath(); s.arc(180, 175, 145, Math.PI * 1.08, Math.PI * (1.08 + 0.82 * sw)); s.stroke();
-    }
-    // one scan beam pass, then gone
-    const bp = (t - 0.15) / 0.9;
-    if (bp > 0 && bp < 1) {
-      const by = -40 + bp * 310, band = s.createLinearGradient(0, by - 40, 0, by + 40);
-      band.addColorStop(0, "rgba(255,255,255,0)"); band.addColorStop(0.5, "rgba(255,255,255,0.7)"); band.addColorStop(1, "rgba(255,255,255,0)");
-      s.globalCompositeOperation = "source-atop"; s.fillStyle = band; s.fillRect(0, by - 40, 360, 80);
-      s.globalCompositeOperation = "source-over"; s.globalAlpha = 0.2; s.fillRect(0, by - 40, 360, 80); s.globalAlpha = 1;
-    }
-    // mark pops in with a spin and overshoot; solid black behind it so the holes read as black circles
-    const mp = (t - 0.3) / 0.45;
-    if (mp > 0) {
-      const sc = easeBack(mp), rot = (1 - easeOut(mp)) * -Math.PI / 2;
-      s.save(); s.translate(296, 122); s.rotate(rot); s.scale(sc, sc);
-      s.fillStyle = "#000"; s.beginPath(); s.roundRect(-36, -36, 72, 72, 14); s.fill();
-      logoPath(s, 0, 0, 74); s.fillStyle = "#fff"; s.fill("evenodd");
-      s.restore();
-    }
-  });
-  // wordmark: letters drop in one by one
-  g.font = `30px "${FONT2}"`;
-  let lx = x + 18;
-  for (const [i, ch] of [..."myty"].entries()) {
-    const p = easeOut((t - 0.45 - i * 0.07) / 0.3);
-    if (p > 0) { g.globalAlpha = p; text(g, ch, lx, y + 50 - (1 - p) * 18, 30, WHITE, FONT2); }
-    lx += g.measureText(ch).width;
+// MYTY mark as block-character art, sampled from the vector mark.
+const ASCII_MARK = (() => {
+  const cols = 26, rows = 13, k = mk(260, 260), kc = k.getContext("2d"), out = [];
+  logoPath(kc, 130, 130, 250);
+  for (let j = 0; j < rows; j++) {
+    let row = "";
+    for (let i = 0; i < cols; i++) row += kc.isPointInPath((i + 0.5) * 260 / cols, (j + 0.5) * 260 / rows, "evenodd") ? "▒" : " ";
+    out.push(row);
   }
-  g.globalAlpha = 1;
-  // tagline wipes in left to right
-  const tp = easeOut((t - 0.75) / 0.35);
-  if (tp > 0) {
-    g.save(); g.beginPath(); g.rect(x, y + bh - 30, bw * tp, 40); g.clip();
-    text(g, "MODULAR POWER ALLY", x + 90, y + 92, 12, "#7f95ff", FONT, "center");
-    g.restore();
-  }
-}
+  return out;
+})();
 
-const BIOS_LINES = [
-  [0.0, "#MYTY Modular BIOS v4.51MY, A Low Power Ally"],
-  [0.0, "#Copyright (C) 1997-2026, MYTY Systems, Ltd."],
-  [0.0, ""],
-  [0.3, "(MYTX870E) MYTY X870E PCIset(TM)"],
-  [0.45, "NVIDIA GeForce RTX 5090 Founders Edition  32768MB GDDR7"],
-  [0.3, ""],
-  [0.6, "AMD Ryzen 9 9900X3D 12-Core Processor at 4400MHz"],
-  [0.8, "MEMTEST"],
-  [2.6, ""],
-  [2.7, "MYTY Plug and Play BIOS Extension  v1.0A"],
-  [2.7, "Copyright (C) 1997, MYTY Systems, Ltd."],
-  [3.1, "IDE0"], [3.85, "IDE1"], [4.45, "IDE2"], [4.9, "IDE3"],
-];
-const IDE = [["Primary Master", "MYTY-HD 2048"], ["Primary Slave", "MYTY-CD 24X"], ["Secondary Master", "None"], ["Secondary Slave", "None"]];
-
-function scenePOST(g, t) {
-  g.fillStyle = BLACK; g.fillRect(0, 0, W, H);
-  let y = 70;
-  for (const [at, line] of BIOS_LINES) {
-    if (t < at) break;
-    if (line.startsWith("#")) { // ribbon line: MYTY mark instead of the Award ribbon
-      if (y === 70) { g.save(); logoPath(g, X0 + 13, y + 14, 27); g.fillStyle = "#4d7cff"; g.fill("evenodd"); g.restore(); }
-      text(g, line.slice(1), X0 + 40, y, FS);
-    } else if (line === "MEMTEST") {
-      const k = clamp((t - at) / 1.6), kb = Math.floor(k * 32768 / 4) * 4;
-      text(g, "Memory Test :  " + String(kb).padStart(5, " ") + "K" + (k >= 1 ? " OK" : ""), X0, y, FS);
-    } else if (line.startsWith("IDE")) {
-      const [name, dev] = IDE[+line[3]], done = t > at + 0.45;
-      text(g, "  Detecting IDE " + name.padEnd(16, " ") + " ... " + (done ? dev : "[Press F4 to skip]"), X0, y, FS, done ? WHITE : "#c8d2ff");
-    } else text(g, typed(line, t, at), X0, y, FS);
-    y += LH;
-  }
-  if (Math.floor(t * 3) % 2 === 0) { g.fillStyle = WHITE; g.fillRect(X0 + 4, y + 26, 20, 5); }
-  powerBadge(g, W - 290, 46, t / BIOS_SPEED);
-  // "DEL" highlighted like the original
-  g.font = `${FS}px "${FONT}"`; const pw = g.measureText("Press ").width, dw = g.measureText("DEL").width;
-  text(g, "Press ", X0, H - 120, FS); text(g, "DEL", X0 + pw, H - 120, FS, "#7f95ff"); text(g, " to enter SETUP", X0 + pw + dw, H - 120, FS);
-  text(g, "10/06/97-X870E,MYTY9900-2A59GH2BC-00", X0, H - 83, FS, "#9fb2ff");
-  scanlines(g);
-}
-
-// Rounded double-line box, drawn on progressively (p 0..1) like a BIOS table filling in.
-function roundedGrid(g, x, y, w, h, p, title) {
-  const r = 22;
-  g.save(); g.strokeStyle = WHITE; g.lineWidth = 3;
-  const len = 2 * (w + h);
-  g.setLineDash([len * p, len]);
-  g.beginPath(); g.roundRect(x, y, w, h, r); g.stroke();
-  g.beginPath(); g.roundRect(x + 9, y + 9, w - 18, h - 18, r - 8); g.stroke();
+// thin double frame with small rounded corners, drawn on progressively (p 0..1)
+function frame(g, x, y, w, h, p, title) {
+  g.save(); g.strokeStyle = FG; g.lineWidth = 1.5;
+  const len = 2 * (w + h); g.setLineDash([len * p, len]);
+  g.beginPath(); g.roundRect(x, y, w, h, 8); g.stroke();
+  g.strokeStyle = DIM; g.beginPath(); g.roundRect(x + 6, y + 6, w - 12, h - 12, 5); g.stroke();
   g.restore();
-  if (title && p > 0.3) {
-    g.font = `${FS}px "${FONT}"`; const tw = g.measureText(title).width + 40;
-    g.fillStyle = BLACK; g.beginPath(); g.roundRect(x + w / 2 - tw / 2, y - 20, tw, 40, 20); g.fill();
-    g.strokeStyle = WHITE; g.lineWidth = 3; g.stroke();
-    text(g, title, x + w / 2, y - 12, FS, WHITE, FONT, "center");
-  }
+  if (title && p > 0.5) { text(g, title, x + 22, y + 20, TS, FG); text(g, "v", x + w - 30, y + 20, TS, DIM); }
 }
+function leader(key, width) { return (key + " ").padEnd(width, "."); }
 
-const CFG_TOP = [
-  ["CPU Type", "Ryzen 9 9900X3D", "Base Memory", "640K"],
-  ["Co-Processor", "12 Cores/24 Thr", "Extended Memory", "31744K"],
-  ["CPU Clock", "4400MHz", "Cache Memory", "131072K"],
+const SPECS = [
+  ["CPU", "AMD RYZEN 9 9900X3D", "12 CORES / 24 THREADS @ 4400MHZ"],
+  ["GPU", "NVIDIA RTX 5090 FE", "32768MB GDDR7"],
+  ["CHIPSET", "MYTY X870E PCISET(TM)", "MYTX870E"],
+  ["MEMORY TEST", "MEM", ""],
+  ["CACHE MEMORY", "131072K", "L2: PIPELINE BURST"],
+  ["PLUG AND PLAY EXT", "V1.0A", "(C) 1997 MYTY SYSTEMS, LTD."],
+  ["IDE PRIMARY MASTER", "MYTY-HD 2048", "LBA, MODE 4, 2048MB"],
+  ["IDE PRIMARY SLAVE", "MYTY-CD 24X", "CDROM, MODE 4"],
+  ["IDE SECONDARY MASTER", "NONE", ""],
+  ["IDE SECONDARY SLAVE", "NONE", ""],
 ];
-const CFG_BOT = [
-  ["Diskette Drive A", "1.44M, 3.5 in.", "Display Type", "RTX 5090 FE"],
-  ["Diskette Drive B", "None", "Serial Port(s)", "3F8 2F8"],
-  ["Pri. Master Disk", "LBA,Mode 4,2048MB", "Parallel Port(s)", "378"],
-  ["Pri. Slave Disk", "CDROM,Mode 4", "EDO DRAM at Row(s)", "0 1 2 3"],
-  ["Sec. Master Disk", "None", "SDRAM at Row(s)", "None"],
-  ["Sec. Slave Disk", "None", "L2 Cache Type", "Pipeline Burst"],
+const MODULES = ["WINLOAD.EFI", "NTOSKRNL.EXE", "HAL.DLL", "KDCOM.DLL", "CI.DLL", "CLFS.SYS", "TPM.SYS", "ACPI.SYS", "PCI.SYS", "STORNVME.SYS", "AMDPPM.SYS", "NVLDDMKM.SYS"];
+const CONFIG = [
+  ["BASE MEMORY", "640K"], ["EXTENDED MEMORY", "31744K"], ["CO-PROCESSOR", "12C / 24T"], ["CPU CLOCK", "4400MHZ"],
+  ["DISKETTE DRIVE A", "1.44M, 3.5 IN."], ["DISKETTE DRIVE B", "NONE"], ["DISPLAY TYPE", "RTX 5090 FE"], ["SERIAL PORT(S)", "3F8 2F8"],
+  ["PARALLEL PORT(S)", "378"], ["EDO DRAM AT ROW(S)", "0 1 2 3"], ["SDRAM AT ROW(S)", "NONE"], ["L2 CACHE TYPE", "PIPELINE BURST"],
 ];
-const PCI = [
-  ["0", "7", "1", "4D59", "1230", "IDE Controller", "14"],
-  ["0", "7", "2", "4D59", "7020", "Serial bus controller", "10"],
-  ["0", "17", "0", "4D59", "0005", "Network controller", "11"],
-  ["1", "0", "0", "10DE", "2B85", "Display controller", "NA"],
+const BUSLOG = [
+  "POST  CPU0 MICROCODE OK", "MEM   0x0000_0000 > 0x0009_FFFF OK", "MEM   0x0010_0000 > 0x01FF_FFFF OK",
+  "PCI   0:07:1 4D59:1230 IDE CTRL  IRQ14", "PCI   0:07:2 4D59:7020 SERIAL BUS IRQ10", "PCI   0:17:0 4D59:0005 NETWORK   IRQ11",
+  "PCI   1:00:0 10DE:2B85 DISPLAY   IRQNA", "IDE0  MYTY-HD 2048 LBA MODE4", "IDE1  MYTY-CD 24X CDROM MODE4", "IDE2  NONE", "IDE3  NONE",
+  "USB   1 KBD / 1 MOUSE / 2 HUB", "TPM   2.0 READY", "SB    SECURE BOOT ENABLED", "NVRAM CHECK OK", "DMI   POOL 0x000F_0000 VERIFY",
+  "DMI   POOL 0x000F_8000 VERIFY", "DMI   POOL DATA OK", "EFI   \\EFI\\MICROSOFT\\BOOT\\BOOTMGFW.EFI", "BOOT  HANDOFF > WINDOWS BOOT MANAGER",
 ];
 
-function sceneGrid(g, t) {
+function sceneTerminal(g, t) {
   g.fillStyle = BLACK; g.fillRect(0, 0, W, H);
-  text(g, "MYTY Systems, Ltd. (C) 1997-2026", W / 2, 40, FS, WHITE, FONT, "center");
-  const gx = 150, gy = 110, gw = W - 300, gh = 420, p = ease(clamp(t / 0.6));
-  roundedGrid(g, gx, gy, gw, gh, p, "System Configurations");
-  if (p >= 1) {
-    const colA = gx + 60, colB = gx + gw / 2 + 40, row = (r) => gy + 40 + r * LH;
-    const cell = (cells, r) => {
-      const [k1, v1, k2, v2] = cells;
-      text(g, k1.padEnd(17, " ") + ": " + v1, colA, row(r), FS);
-      text(g, k2.padEnd(19, " ") + ": " + v2, colB, row(r), FS);
-    };
-    CFG_TOP.forEach((c, i) => cell(c, i));
-    // rounded divider
-    g.fillStyle = WHITE; g.beginPath(); g.roundRect(gx + 30, row(3) + 6, gw - 60, 3, 2); g.fill();
-    CFG_BOT.forEach((c, i) => cell(c, i + 3.4));
-    g.beginPath(); g.roundRect(gx + gw / 2, gy + 30, 3, gh - 60, 2); g.fill(); // centre column rule
+  const X = 70;
+
+  // ASCII mark scans in row by row
+  ASCII_MARK.forEach((row, j) => {
+    const p = clamp((t - j * 0.035) / 0.12);
+    if (p > 0) text(g, row.slice(0, Math.ceil(row.length * p)), X, 40 + j * 16, 16, j === Math.floor(t / 0.035) ? WHITE : FG);
+  });
+  text(g, typed("MYTY.TERMINAL V4.51MY - MYTY SYSTEMS 2026", t, 0.25, 0.3), X, 268, TS, FG);
+  text(g, typed("NAVIGATE WITH ARROW & ENTER KEYS  //  DEL: SETUP  F11: BOOT MENU", t, 0.4, 0.3), X, 300, TS, DIM);
+
+  // device line with a boxed status tag
+  if (t > 0.55) {
+    g.strokeStyle = FG; g.lineWidth = 1.5; g.strokeRect(X, 342, 16, 16);
+    g.fillStyle = ACC; g.beginPath(); g.arc(X + 34, 350, 5, 0, Math.PI * 2); g.fill();
+    const dl = "M-001 - X870E-MYTY9900 - MODULAR BIOS V4.51MY";
+    text(g, dl, X + 50, 340, TS, FG);
+    g.font = `${TS}px "${FONT}"`; const tx = X + 50 + g.measureText(dl).width + 16, tag = "A LOW POWER ALLY - ACTIVE";
+    const tw = g.measureText(tag).width + 16; g.strokeStyle = FG; g.strokeRect(tx, 336, tw, 28); text(g, tag, tx + 8, 340, TS, FG);
   }
-  // PCI device listing, rows arriving one by one
-  let y = gy + gh + 40;
-  if (t > 1.0) {
-    text(g, typed("PCI device listing.....", t, 1.0, 0.25), gx, y, FS); y += LH;
+
+  // tabs; highlight moves as the boot progresses
+  const tabs = ["SYSTEM", "KERNEL", "BOOT"], phase = t < 2.7 ? 0 : t < 5.0 ? 1 : 2;
+  if (t > 0.7) {
+    let tx = X + 50;
+    g.font = `${TS}px "${FONT}"`;
+    tabs.forEach((name, i) => {
+      const w = g.measureText(name).width;
+      if (i === phase) { g.strokeStyle = WHITE; g.lineWidth = 1.5; g.strokeRect(tx - 6, 386, w + 12, 28); }
+      text(g, name, tx, 390, TS, i === phase ? WHITE : DIM);
+      tx += w + 44;
+    });
   }
-  if (t > 1.3) {
-    const pw = gw, ph = LH * 6 + 20, q = ease(clamp((t - 1.3) / 0.4));
-    roundedGrid(g, gx, y, pw, ph, q, null);
-    if (q >= 1) {
-      const cols = [0, 140, 290, 430, 580, 730, 1460].map(c => gx + 40 + c);
-      ["Bus No.", "Device No.", "Func No.", "Vendor ID", "Device ID", "Device Class", "IRQ"].forEach((h, i) => text(g, h, cols[i], y + 20, FS, "#9fb2ff"));
-      g.fillStyle = WHITE; g.beginPath(); g.roundRect(gx + 30, y + 20 + LH, pw - 60, 3, 2); g.fill();
-      PCI.forEach((r, j) => { if (t > 1.9 + j * 0.3) r.forEach((v, i) => text(g, v, cols[i], y + 30 + LH * (j + 1), FS)); });
+
+  const cy0 = 446;
+  if (phase === 0) {
+    SPECS.forEach(([k, v, extra], i) => {
+      const at = 0.85 + i * 0.16;
+      if (t < at) return;
+      const y = cy0 + i * TL;
+      let val = v, ex = extra;
+      if (v === "MEM") { const m = clamp((t - at) / 0.9); val = String(Math.floor(m * 32768 / 4) * 4).padStart(5, " ") + "K"; ex = m >= 1 ? "OK" : "TESTING"; }
+      if (k.startsWith("IDE") && t < at + 0.25) { val = "...."; ex = "DETECTING"; }
+      text(g, typed(leader(k, 30), t, at, 0.08), X + 50, y, TS, DIM);
+      if (t > at + 0.08) {
+        text(g, "<", X + 50 + 31 * 10, y, TS, DIM);
+        text(g, val.padStart(22, " ").slice(-22), X + 50 + 33 * 10, y, TS, WHITE);
+        text(g, ">", X + 50 + 56 * 10, y, TS, DIM);
+        text(g, ex, X + 50 + 59 * 10, y, TS, ex === "OK" ? ACC : DIM);
+      }
+    });
+  } else if (phase === 1) {
+    const k0 = 2.75, done = MODULES.filter((_, i) => t > k0 + i * 0.18 + 0.25).length;
+    text(g, leader("LOADING KERNEL", 30) + " [" + String(done).padStart(2, "0") + "/" + MODULES.length + "]", X + 50, cy0, TS, FG);
+    MODULES.forEach((m, i) => {
+      const at = k0 + i * 0.18;
+      if (t < at) return;
+      const y = cy0 + (i + 1.4) * TL, p = clamp((t - at) / 0.25), n = 24, f = Math.round(p * n);
+      const addr = "0xFFFFF803`" + (0x4A200000 + i * 0x2D7000).toString(16).toUpperCase();
+      text(g, addr, X + 50, y, TS, DIM);
+      text(g, m.padEnd(14, " "), X + 50 + 21 * 10, y, TS, WHITE);
+      text(g, "█".repeat(f) + "░".repeat(n - f), X + 50 + 36 * 10, y, TS, p >= 1 ? ACC : FG);
+      text(g, p >= 1 ? "OK" : String(Math.round(p * 100)).padStart(3, " ") + "%", X + 50 + 62 * 10, y, TS, p >= 1 ? ACC : DIM);
+    });
+  } else {
+    const b0 = 5.05, dots = clamp(Math.floor((t - b0) / 0.02), 0, 24);
+    text(g, leader("VERIFYING DMI POOL DATA", 30) + " " + ".".repeat(dots) + (dots >= 24 ? " OK" : ""), X + 50, cy0, TS, dots >= 24 ? FG : DIM);
+    if (t > b0 + 0.6) {
+      text(g, leader("BOOT DEVICE", 30) + " < WINDOWS BOOT MANAGER >", X + 50, cy0 + TL, TS, FG);
+      const p = clamp((t - b0 - 0.7) / 0.8), n = 48, f = Math.round(p * n);
+      text(g, "█".repeat(f) + "░".repeat(n - f) + "  " + String(Math.round(p * 100)).padStart(3, " ") + "%", X + 50, cy0 + TL * 2.5, TS, ACC);
+      if (p >= 1) text(g, "BOOTING FROM WINDOWS BOOT MANAGER" + ".".repeat(clamp(Math.floor((t - b0 - 1.5) / 0.15), 0, 3)), X + 50, cy0 + TL * 4, TS, WHITE);
     }
-    y += ph + 24;
   }
-  if (t > 3.4) {
-    const dots = ".".repeat(Math.min(20, Math.floor((t - 3.4) / 0.04)));
-    text(g, "Verifying DMI Pool Data " + dots, gx, y, FS); y += LH;
+
+  // firmware notice + help bar, bottom left
+  if (t > 1.0) {
+    const ny = 880;
+    text(g, "MYTY MODULAR BIOS V4.51MY", X, ny, TS, FG);
+    ["COPYRIGHT (C) 1997-2026, MYTY SYSTEMS, LTD. ALL RIGHTS RESERVED.", "LOW POWER ALLY. SETTINGS AND BEHAVIOUR MAY CHANGE BETWEEN RELEASES.", "REPORT ISSUES TO SUPPORT@MYTY.SYSTEMS"]
+      .forEach((l, i) => text(g, l, X, ny + 30 + i * 26, 16, DIM));
+    g.strokeStyle = FG; g.lineWidth = 1.5; g.beginPath(); g.roundRect(X, 1010, 230, 30, 4); g.stroke();
+    text(g, "HELP", X + 12, 1015, TS, FG); text(g, "v", X + 206, 1015, TS, DIM);
+    text(g, "10/06/97-X870E,MYTY9900-2A59GH2BC-00", X + 260, 1015, TS, DIM);
   }
-  if (t > 4.4) text(g, "Booting from Windows Boot Manager" + ".".repeat(Math.min(3, Math.floor((t - 4.4) / 0.25))), gx, y, FS);
-  if (Math.floor(t * 3) % 2 === 0) { g.fillStyle = WHITE; g.fillRect(gx, y + LH + 26, 20, 5); }
+
+  // SYSTEM CONFIGURATIONS panel with a memory map that fills during the memory test
+  const PX = 1130, PW = 730;
+  const p1 = ease(clamp((t - 0.6) / 0.5));
+  if (p1 > 0) {
+    frame(g, PX, 40, PW, 420, p1, "SYSTEM CONFIGURATIONS");
+    if (p1 >= 1) {
+      CONFIG.forEach(([k, v], i) => {
+        if (t < 1.1 + i * 0.07) return;
+        const col = i % 2, row = Math.floor(i / 2), x = PX + 30 + col * 350, y = 92 + row * TL;
+        text(g, (k + " ").padEnd(19, ".") + " " + v, x, y, 16, col ? FG : FG);
+      });
+      // memory map: 48x6 cells
+      const mx = PX + 30, my = 276, cw = 14, ch = 14, cols = 46, rows = 8, filled = Math.floor(clamp((t - 1.5) / 0.9) * cols * rows);
+      text(g, "MEMORY MAP  32768K", mx, my - 4, 16, DIM);
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const n = j * cols + i, on = n < filled;
+        g.fillStyle = on ? (n === filled - 1 ? WHITE : ACC) : "#1b1e2a";
+        g.fillRect(mx + i * cw, my + 20 + j * ch, cw - 3, ch - 3);
+      }
+    }
+  }
+
+  // BUS LOGGER panel: streaming log lines (newest on top) + plot with a moving dot
+  const p2 = ease(clamp((t - 1.0) / 0.5));
+  if (p2 > 0) {
+    const by = 490, bh = 560;
+    frame(g, PX, by, PW, bh, p2, "BUS LOGGER");
+    if (p2 >= 1) {
+      const shown = BUSLOG.map((l, i) => [l, 1.4 + i * 0.22]).filter(([, at]) => t >= at).reverse().slice(0, 18);
+      shown.forEach(([l, at], i) => {
+        const s = 2 + Math.floor(at * 7);
+        text(g, `M001_09:41:${String(s).padStart(2, "0")} >`, PX + 30, by + 60 + i * 26, 14, i === 0 ? WHITE : FG);
+        text(g, l.slice(0, 30), PX + 190, by + 60 + i * 26, 14, i === 0 ? WHITE : DIM);
+      });
+      // plot grid
+      const gx = PX + 470, gy = by + 56, gw = 230, gh = 470;
+      g.strokeStyle = "#3a3f52"; g.lineWidth = 1;
+      for (let i = 0; i <= 6; i++) { g.beginPath(); g.moveTo(gx + i * gw / 6, gy); g.lineTo(gx + i * gw / 6, gy + gh); g.stroke(); }
+      for (let j = 0; j <= 12; j++) { g.beginPath(); g.moveTo(gx, gy + j * gh / 12); g.lineTo(gx + gw, gy + j * gh / 12); g.stroke(); }
+      g.strokeStyle = FG; g.strokeRect(gx, gy, gw, gh);
+      for (let k = 6; k >= 0; k--) { // dot with a short trail
+        const tt = t - k * 0.04, dx = gx + gw / 2 + Math.sin(tt * 2.3) * gw * 0.38, dy = gy + gh / 2 + Math.sin(tt * 1.7 + 1) * gh * 0.4;
+        g.fillStyle = k ? `rgba(214,217,228,${0.12 * (6 - k)})` : WHITE; g.fillRect(dx - 3, dy - 3, 6, 6);
+      }
+      const dxv = Math.round(1900 + Math.sin(t * 2.3) * 400), dyv = Math.round(520 + Math.sin(t * 1.7 + 1) * 300);
+      text(g, `X: ${dxv}  Y: ${dyv}`, gx, gy + gh + 4, 14, DIM);
+    }
+  }
   scanlines(g);
 }
 
@@ -335,6 +322,13 @@ function sceneEnd(g, v) {
   g.fillStyle = BLUE; g.fillRect(0, 0, W, H);
   const k = 1 - Math.pow(1 - clamp(v / 0.45), 3), dy = (1 - k) * 60;
   g.globalAlpha = k;
+  // faint grid and a thin rounded frame
+  g.strokeStyle = "rgba(255,255,255,0.06)"; g.lineWidth = 1;
+  for (let x = 0; x <= W; x += 80) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = 0; y <= H; y += 80) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+  g.strokeStyle = "rgba(255,255,255,0.5)"; g.lineWidth = 1.5; g.beginPath(); g.roundRect(30, 30, W - 60, H - 60, 10); g.stroke();
+  text(g, "MYTY.TERMINAL // SESSION M-001", 60, 56, 18, WHITE);
+  text(g, "RYZEN 9 9900X3D  /  RTX 5090 FE  /  SYS READY", 60, H - 76, 18, "rgba(255,255,255,0.7)");
   text(g, "09:41", W / 2, 330 + dy, 150, WHITE, FONT, "center");
   text(g, "TUESDAY, OCTOBER 6", W / 2, 505 + dy * 1.3, 32, WHITE, FONT2, "center");
   icon(g, "wifi", W - 230, H - 82, 4); icon(g, "battery", W - 150, H - 78, 4);
@@ -345,10 +339,8 @@ function sceneEnd(g, v) {
 function renderAt(t) {
   const g = ctx;
   g.globalCompositeOperation = "source-over"; g.globalAlpha = 1;
-  if (t < T.post) sceneBlack(g);
-  else if (t < T.postEnd) scenePOST(g, (t - T.post) * BIOS_SPEED);
-  else if (t < T.grid) sceneBlack(g);
-  else if (t < T.gridEnd) sceneGrid(g, (t - T.grid) * BIOS_SPEED);
+  if (t < T.term) sceneBlack(g);
+  else if (t < T.termEnd) sceneTerminal(g, t - T.term);
   else if (t < T.blue) sceneBlack(g);
   else if (t < T.impact) sceneBlue(g, t);
   else sceneEnd(g, t - T.impact);
