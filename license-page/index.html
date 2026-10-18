@@ -1,0 +1,416 @@
+<title>MYTY Mini Maker License</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: single centred column (max 1120px); hero over a print-bed grid, three plan cards, then info sections stacked. */
+  :root {
+    --bg: #eef1ef;
+    --surface: #ffffff;
+    --fg: #121614;
+    --muted: #59625d;
+    --line: #d4dad6;
+    --accent: #1f47ff;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2e7ff;
+    --grid: rgba(18, 22, 20, 0.06);
+    --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+    --font-body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1110; --surface: #171b19; --fg: #eef2ef; --muted: #9aa49e; --line: #2a302d;
+      --accent: #6f8bff; --accent-ink: #0b0e1c; --accent-soft: #1c2346; --grid: rgba(238, 242, 239, 0.05);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1110; --surface: #171b19; --fg: #eef2ef; --muted: #9aa49e; --line: #2a302d;
+    --accent: #6f8bff; --accent-ink: #0b0e1c; --accent-soft: #1c2346; --grid: rgba(238, 242, 239, 0.05);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1120px; margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.05; }
+  h2 { font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 800; font-stretch: 85%; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  .label {
+    font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .lead { color: var(--muted); font-size: 1.1rem; max-width: 60ch; }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .draft {
+    background: var(--accent-soft); color: var(--fg);
+    font-family: var(--font-mono); font-size: 0.75rem; text-align: center;
+    padding-block: 8px;
+  }
+
+  /* Hero */
+  .hero {
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .hero .wrap { padding-block: clamp(56px, 9vw, 104px) clamp(48px, 7vw, 80px); display: grid; gap: 24px; }
+  .hero h1 {
+    font-size: clamp(2.6rem, 8vw, 5.4rem); font-weight: 900; font-stretch: 75%;
+    text-transform: uppercase; letter-spacing: -0.01em; max-width: 14ch;
+  }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .specs { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .specs span::before { content: "■ "; color: var(--accent); }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--font-body); font-weight: 600; font-size: 1rem;
+    padding: 13px 22px; border-radius: 6px; border: 1px solid var(--fg);
+    text-decoration: none; cursor: pointer; background: transparent; color: var(--fg);
+    transition: transform .15s ease, background .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+  section.block { padding-block: clamp(56px, 8vw, 96px); }
+  section.block + section.block { border-top: 1px solid var(--line); }
+  .head { display: grid; gap: 12px; margin-bottom: 40px; }
+
+  /* Plans */
+  .plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+  .plan {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 28px 24px; display: flex; flex-direction: column; gap: 20px; position: relative;
+  }
+  .plan.featured { border: 2px solid var(--accent); }
+  .tag {
+    position: absolute; top: -12px; left: 24px;
+    background: var(--accent); color: var(--accent-ink);
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 4px;
+  }
+  .plan h3 { font-size: 1.6rem; font-weight: 800; font-stretch: 85%; }
+  .months { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+  .months i { height: 8px; border-radius: 2px; background: var(--line); }
+  .months i.on { background: var(--accent); }
+  .price { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+  .price strong { font-family: var(--font-display); font-size: 3rem; font-weight: 800; font-stretch: 80%; line-height: 1; }
+  .price span { color: var(--muted); }
+  .per { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.3em; }
+  .per b { color: var(--accent); font-weight: 500; }
+  .plan ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; flex: 1; }
+  .plan li { padding-left: 26px; position: relative; font-size: 0.95rem; }
+  .plan li::before {
+    content: ""; position: absolute; left: 2px; top: 0.5em; width: 12px; height: 7px;
+    border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg);
+  }
+  .plan li.inherit { color: var(--muted); }
+  .plan li.inherit::before { border-color: var(--muted); }
+  .plan .btn { width: 100%; }
+  .unlimited {
+    margin-top: 24px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: center;
+    color: var(--muted); font-size: 0.95rem; text-align: center;
+  }
+
+  /* Included grid */
+  .included { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 40px; }
+  .included div { display: grid; gap: 8px; align-content: start; }
+  .included h3 { font-size: 1.15rem; font-weight: 700; font-stretch: 100%; line-height: 1.25; }
+  .included p { color: var(--muted); }
+
+  /* Steps */
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; counter-reset: s; }
+  .step { border-top: 2px solid var(--fg); padding-top: 16px; display: grid; gap: 8px; align-content: start; }
+  .step .label { color: var(--accent); }
+  .step h3 { font-size: 1.25rem; font-weight: 700; font-stretch: 95%; line-height: 1.2; }
+  .step p { color: var(--muted); }
+
+  /* Rules */
+  .rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .rule-col { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 24px; display: grid; gap: 14px; align-content: start; }
+  .rule-col h3 { font-size: 1.2rem; font-weight: 700; font-stretch: 95%; }
+  .rule-col ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+  .rule-col.no li::marker { content: "✕  "; color: var(--muted); }
+  .rule-col.yes li::marker { content: "✓  "; color: var(--accent); }
+
+  /* FAQ */
+  .faq { display: grid; gap: 0; max-width: 820px; }
+  .faq details { border-bottom: 1px solid var(--line); padding-block: 18px; }
+  .faq details:first-child { border-top: 1px solid var(--line); }
+  .faq summary {
+    cursor: pointer; font-weight: 600; font-size: 1.05rem; list-style: none;
+    display: flex; justify-content: space-between; gap: 16px;
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; font-family: var(--font-mono); color: var(--accent); font-size: 1.2rem; line-height: 1; }
+  .faq details[open] summary::after { content: "−"; }
+  .faq details p { color: var(--muted); margin-top: 10px; max-width: 68ch; }
+
+  /* Closing CTA */
+  .closing { background: var(--fg); color: var(--bg); }
+  .closing .wrap { padding-block: clamp(56px, 8vw, 88px); display: grid; gap: 20px; justify-items: start; }
+  .closing h2 { font-stretch: 75%; text-transform: uppercase; font-weight: 900; font-size: clamp(2rem, 5vw, 3.4rem); }
+  .closing p { opacity: .75; max-width: 56ch; }
+  .closing .btn.primary { border-color: var(--accent); }
+
+  @media (max-width: 860px) {
+    .plans, .included, .steps, .rules { grid-template-columns: minmax(0, 1fr); }
+    .plans { gap: 28px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .btn { transition: none; } .btn:hover { transform: none; } }
+</style>
+
+<div class="draft">Draft for Framer · prices are suggestions</div>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="label">MYTY Mini · Commercial license</p>
+    <h1>Print it. Sell it. <em>No limits.</em></h1>
+    <p class="lead">Make and sell as many MYTY Mini cases as you like. Choose how long you want to sell for. Every plan includes unlimited prints, your own licensed files, and every new revision while your license is active.</p>
+    <div class="hero-cta">
+      <a class="btn primary" href="#plans">See plans</a>
+      <a class="btn" href="#how">How it works</a>
+    </div>
+    <div class="specs label">
+      <span>Unlimited cases</span>
+      <span>Unlimited add-on modules</span>
+      <span>1, 3 or 6 months</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="block" id="plans">
+    <div class="wrap">
+      <div class="head">
+        <p class="label">Plans</p>
+        <h2>One price. As many prints as you can sell.</h2>
+        <p class="lead">Pay for time, not volume. Longer plans cost less per month and add more ways to reach buyers.</p>
+      </div>
+
+      <div class="plans">
+        <article class="plan">
+          <div style="display:grid;gap:12px">
+            <p class="label">1 month</p>
+            <h3>Starter</h3>
+            <div class="months" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div style="display:grid;gap:4px">
+            <div class="price"><strong>€99</strong><span>/ month</span></div>
+            <p class="per">Try it with no long commitment</p>
+          </div>
+          <ul>
+            <li>Unlimited MYTY Mini cases</li>
+            <li>Unlimited add-on modules</li>
+            <li>Personal, licensed STL files</li>
+            <li>Every new revision while active</li>
+            <li>Unlimited verification cards</li>
+            <li>Licensed MYTY Mini branding and badge</li>
+          </ul>
+          <a class="btn" href="#">Start 1 month</a>
+        </article>
+
+        <article class="plan featured">
+          <span class="tag">Most popular</span>
+          <div style="display:grid;gap:12px">
+            <p class="label">3 months</p>
+            <h3>Maker</h3>
+            <div class="months" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div>
+          </div>
+          <div style="display:grid;gap:4px">
+            <div class="price"><strong>€249</strong><span>/ 3 months</span></div>
+            <p class="per">€83 a month · <b>save 16%</b></p>
+          </div>
+          <ul>
+            <li class="inherit">Everything in Starter</li>
+            <li>Listing in the Authorized Maker directory</li>
+            <li>Public verified-sales count on your profile</li>
+            <li>10% commission on official add-ons your buyers order</li>
+          </ul>
+          <a class="btn primary" href="#">Start 3 months</a>
+        </article>
+
+        <article class="plan">
+          <span class="tag">Best value</span>
+          <div style="display:grid;gap:12px">
+            <p class="label">6 months</p>
+            <h3>Studio</h3>
+            <div class="months" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+          </div>
+          <div style="display:grid;gap:4px">
+            <div class="price"><strong>€429</strong><span>/ 6 months</span></div>
+            <p class="per">€71.50 a month · <b>save 28%</b></p>
+          </div>
+          <ul>
+            <li class="inherit">Everything in Maker</li>
+            <li>Priority placement in the directory</li>
+            <li>New revisions and modules 30 days early</li>
+          </ul>
+          <a class="btn" href="#">Start 6 months</a>
+        </article>
+      </div>
+
+      <div class="unlimited">
+        <span>No print caps on any plan</span>
+        <span>Prices exclude VAT</span>
+        <span>Renew any time before your license ends</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="head">
+        <p class="label">Included with every plan</p>
+        <h2>Everything you need to sell a genuine MYTY Mini</h2>
+      </div>
+      <div class="included">
+        <div>
+          <h3>Unlimited prints</h3>
+          <p>Print and sell as many cases and add-on modules as your printers can handle. Nothing to count and nothing to report.</p>
+        </div>
+        <div>
+          <h3>Your own licensed files</h3>
+          <p>You get a copy of the files made for your license alone, delivered through a private download link.</p>
+        </div>
+        <div>
+          <h3>Every new revision</h3>
+          <p>When the Mini gets an update, your files update too, for as long as your license is active.</p>
+        </div>
+        <div>
+          <h3>Verification cards</h3>
+          <p>Download printable QR cards whenever you need them, free. One card goes in each order.</p>
+        </div>
+        <div>
+          <h3>Official branding</h3>
+          <p>Sell as "Licensed MYTY Mini, made by [your shop]" and show the Authorized Maker badge on your listings.</p>
+        </div>
+        <div>
+          <h3>Print guide</h3>
+          <p>Recommended materials and minimum print settings, so every case you ship holds up the way it should.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="how">
+    <div class="wrap">
+      <div class="head">
+        <p class="label">How it works</p>
+        <h2>From checkout to your first sale</h2>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <p class="label">Step 1</p>
+          <h3>Pick your plan</h3>
+          <p>Choose 1, 3 or 6 months and check out. Your license starts right away.</p>
+        </div>
+        <div class="step">
+          <p class="label">Step 2</p>
+          <h3>Download your files</h3>
+          <p>Your licensed files and the print guide arrive by email. You'll also find them in your maker dashboard.</p>
+        </div>
+        <div class="step">
+          <p class="label">Step 3</p>
+          <h3>Print, pack, ship</h3>
+          <p>Put a verification card in every order. Your buyer scans it, registers their build, and unlocks 15% off official add-ons.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="head">
+        <p class="label">License rules</p>
+        <h2>What the license covers</h2>
+        <p class="lead">A short version. The full license terms apply at checkout.</p>
+      </div>
+      <div class="rules">
+        <div class="rule-col yes">
+          <h3>You can</h3>
+          <ul>
+            <li>3D print and sell unlimited MYTY Mini cases and add-ons</li>
+            <li>Sell online, at markets or in your own shop</li>
+            <li>Use "Licensed MYTY Mini, made by [your shop]" and the Authorized Maker badge</li>
+            <li>Sell printed stock for 30 days after your license ends</li>
+          </ul>
+        </div>
+        <div class="rule-col no">
+          <h3>You can't</h3>
+          <ul>
+            <li>Share, sell or upload the files, or anything made from them</li>
+            <li>Transfer your license to someone else</li>
+            <li>Injection mould or mass-manufacture the design</li>
+            <li>Sell modified versions as your own design</li>
+            <li>Use the MYTY name or logo in any other way</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="head">
+        <p class="label">Questions</p>
+        <h2>Frequently asked</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Is it really unlimited?</summary>
+          <p>Yes. Every plan lets you print and sell as many MYTY Mini cases and add-on modules as you want while your license is active. The only difference between plans is how long they last and the extras that come with them.</p>
+        </details>
+        <details>
+          <summary>What happens when my license ends?</summary>
+          <p>Your right to sell new prints ends, and you stop receiving new revisions. Cases you've already printed can still be sold for 30 days. Renew before the end date to keep selling without a gap.</p>
+        </details>
+        <details>
+          <summary>Can I switch to a longer plan?</summary>
+          <p>Yes. Choose a longer plan when you renew, or contact us to upgrade mid-term and we'll credit the time you have left.</p>
+        </details>
+        <details>
+          <summary>Why does every order need a verification card?</summary>
+          <p>The card proves to your buyer that they've bought a genuine, licensed MYTY Mini. When they register it, the sale counts toward your verified-sales total in the directory, and they get 15% off official add-ons. Putting the card in the box is the only thing you need to do.</p>
+        </details>
+        <details>
+          <summary>What materials should I use?</summary>
+          <p>Use heat-resistant materials such as PETG, ASA or better, and follow the minimum print settings in the print guide. PLA isn't approved for structural parts.</p>
+        </details>
+        <details>
+          <summary>Who is responsible for the products I sell?</summary>
+          <p>You are the manufacturer of the cases you print, so product safety and consumer-law obligations in the countries you sell to are yours to meet.</p>
+        </details>
+        <details>
+          <summary>Can I share my files with a friend or my team?</summary>
+          <p>No. Licenses are personal and the files are made for your license alone. Each maker needs their own license.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="closing">
+  <div class="wrap">
+    <p class="label" style="color:inherit;opacity:.6">Ready when you are</p>
+    <h2>Start selling MYTY Mini today</h2>
+    <p>Unlimited prints from day one. Pick the plan that fits how long you want to sell.</p>
+    <a class="btn primary" href="#plans">Choose a plan</a>
+  </div>
+</section>
