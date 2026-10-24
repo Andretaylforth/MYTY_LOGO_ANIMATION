@@ -136,7 +136,8 @@ public sealed class MainForm : Form
         Controls.Add(body);
         Controls.Add(header);
 
-        _wifiHint.Text = "The phone app finds this PC automatically on the same Wi-Fi.\nIf it doesn't, type one of these addresses into the app.";
+        _wifiHint.Text = "The phone finds this PC automatically on the same Wi-Fi. If not, type the\n" +
+                         "first address into the app. Test: open http://<address> in the phone's browser.";
         _usbHint.Text = "Turn on USB debugging on the phone and plug it in, or turn on USB tethering\nand use Wi-Fi mode. See README for details.";
 
         _tray = new NotifyIcon
@@ -196,10 +197,11 @@ public sealed class MainForm : Form
 
     private void Refresh_()
     {
-        var ips = Discovery.LocalIPv4().Select(a => $"{a.ip}:{_server.Port}").Distinct().ToList();
+        var ips = Discovery.LocalIPv4().Select(a => a.ip.ToString()).Distinct().ToList();
         _addresses.Text = !_server.LanEnabled ? "Wi-Fi blocked: run as administrator"
                         : ips.Count == 0 ? "No network connection"
-                        : string.Join("\n", ips.Take(3));
+                        : $"{ips[0]}   (port {_server.Port})" +
+                          (ips.Count > 1 ? $"\nother adapters: {string.Join(", ", ips.Skip(1).Take(3))}" : "");
 
         _usb.Text = _adb.Status;
 

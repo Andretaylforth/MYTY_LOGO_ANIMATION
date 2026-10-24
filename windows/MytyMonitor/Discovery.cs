@@ -95,19 +95,36 @@ public sealed class Discovery : IDisposable
         }
     }
 
+    /// <summary>
+    /// This PC's IPv4 addresses, real network adapters first. Virtual adapters (Hyper-V, WSL, VirtualBox,
+    /// VMware, VPNs) are listed last because a phone can't reach them.
+    /// </summary>
     public static IEnumerable<(IPAddress ip, IPAddress mask)> LocalIPv4()
     {
+        var list = new List<(IPAddress ip, IPAddress mask, int rank)>();
         foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
         {
             if (nic.OperationalStatus != OperationalStatus.Up) continue;
-            if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-            foreach (var u in nic.GetIPProperties().UnicastAddresses)
+            if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
+            var props = nic.GetIPProperties();
+            var hasGateway = props.GatewayAddresses.Any(g =>
+                g.Address.AddressFamily == AddressFamily.InterNetwork && !g.Address.Equals(IPAddress.Any));
+            var rank = IsVirtual(nic) ? 2 : hasGateway ? 0 : 1;
+            foreach (var u in props.UnicastAddresses)
             {
                 if (u.Address.AddressFamily != AddressFamily.InterNetwork) continue;
                 if (u.Address.ToString().StartsWith("169.254.")) continue; // no DHCP lease
-                yield return (u.Address, u.IPv4Mask);
+                list.Add((u.Address, u.IPv4Mask, rank));
             }
         }
+        return list.OrderBy(x => x.rank).Select(x => (x.ip, x.mask));
+    }
+
+    private static bool IsVirtual(NetworkInterface nic)
+    {
+        var text = nic.Name + " " + nic.Description;
+        string[] hints = ["Hyper-V", "vEthernet", "WSL", "VirtualBox", "VMware", "Virtual", "TAP-", "WireGuard", "Tailscale", "ZeroTier"];
+        return hints.Any(h => text.Contains(h, StringComparison.OrdinalIgnoreCase));
     }
 
     public void Dispose()

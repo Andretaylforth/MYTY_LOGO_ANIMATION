@@ -10,8 +10,8 @@ public sealed class Settings
     private static readonly string FilePath = Path.Combine(Dir, "settings.json");
 
     public bool StartMinimized { get; set; }
-    /// <summary>Exe path the firewall rule was created for; re-added if the app is moved.</summary>
-    public string? FirewallRuleFor { get; set; }
+    /// <summary>Which version of the firewall rules has been installed; bump to replace old rules.</summary>
+    public int FirewallRules { get; set; }
 
     public static Settings Load()
     {
@@ -31,17 +31,30 @@ internal static class SystemSetup
 {
     private const string TaskName = "MytyMonitor";
 
+    private const int FirewallRulesVersion = 2;
+
     public static void EnsureFirewallRule(Settings settings)
     {
-        var exe = Environment.ProcessPath!;
-        if (string.Equals(settings.FirewallRuleFor, exe, StringComparison.OrdinalIgnoreCase)) return;
-        RunHidden("netsh", $"advfirewall firewall delete rule name=\"Myty Monitor\"");
+        if (settings.FirewallRules >= FirewallRulesVersion) return;
+
+        // The stats server runs on HttpListener, which is served by the http.sys driver (the "System"
+        // process), so an exe-based rule never matches it. Open the ports instead. All profiles,
+        // because Windows often marks home Wi-Fi as "Public".
+        RunHidden("netsh", "advfirewall firewall delete rule name=\"Myty Monitor\"");
+        RunHidden("netsh", "advfirewall firewall delete rule name=\"Myty Monitor (stats)\"");
+        RunHidden("netsh", "advfirewall firewall delete rule name=\"Myty Monitor (discovery)\"");
         var ok = RunHidden("netsh",
-            $"advfirewall firewall add rule name=\"Myty Monitor\" dir=in action=allow program=\"{exe}\" enable=yes profile=private,domain") == 0;
+            $"advfirewall firewall add rule name=\"Myty Monitor (stats)\" dir=in action=allow protocol=TCP localport={StatsServer.DefaultPort} profile=any") == 0;
+        ok &= RunHidden("netsh",
+            $"advfirewall firewall add rule name=\"Myty Monitor (discovery)\" dir=in action=allow protocol=UDP localport={Discovery.UdpPort} profile=any") == 0;
         if (ok)
         {
-            settings.FirewallRuleFor = exe;
+            settings.FirewallRules = FirewallRulesVersion;
             settings.Save();
+        }
+        else
+        {
+            Log.Write("couldn't add firewall rules");
         }
     }
 

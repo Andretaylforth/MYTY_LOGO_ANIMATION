@@ -40,7 +40,13 @@ cd android && ./gradlew assembleRelease
 
 Put the phone and PC on the same network. The PC announces itself over UDP port 5318, so it shows up in the app's list. If it doesn't (some routers block this, for example guest networks or "AP isolation"), type the address shown in the PC window, such as `192.168.1.20`.
 
-The first time it runs, the PC app adds a Windows Firewall rule for private networks. If your network is set to **Public** in Windows, switch it to Private or allow the app when Windows asks.
+The first time it runs, the PC app opens TCP port 5317 (stats) and UDP port 5318 (discovery) in Windows Firewall. Other antivirus or firewall software may need the same two ports allowed.
+
+**Can't connect?** In the phone's browser, open `http://<PC address>:5317` (for example `http://192.168.1.20:5317`).
+- If the page says *"Myty Monitor is running"*, the network is fine; check the address typed into the app.
+- If it doesn't load, something between the phone and PC is blocking it. Make sure both are on the same Wi-Fi (not a guest network, and not mobile data on the phone), and check any third-party firewall on the PC.
+
+The address in the PC window, e.g. `192.168.1.20 (port 5317)`, is all you need to type. Adding `:5317` on the end is optional. Addresses listed under "other adapters" belong to virtual adapters (VPN, WSL, Hyper-V) and won't work from the phone.
 
 ### USB cable
 
@@ -61,7 +67,7 @@ There are two ways to connect over a cable:
 - Sensors are read with [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor). Anything a sensor doesn't report shows as `--`. If CPU temperature or fans show `--` even when running as admin, the hardware driver probably isn't installed: recent LibreHardwareMonitor versions use **PawnIO**. Installing PawnIO (the LibreHardwareMonitor app offers to do it) normally fixes this.
 - **CPU fan** is the first motherboard fan header named "CPU" or "Pump", or else the first one spinning. Many motherboards label headers only as "Fan #1, #2…", so on those boards the reading may come from a different fan.
 - **Per-process GPU %** uses the same Windows counters as Task Manager. Per-process network usage isn't shown, because Windows has no cheap way to read it.
-- The PC app serves read-only stats over plain HTTP on your local network, so anyone on the same network can read them. Don't run it on networks you don't trust.
+- The PC app serves read-only stats over plain HTTP on whatever network the PC is on (including ones Windows marks as Public), so anyone on the same network can read them, including process names. Quit it from the tray on networks you don't trust.
 - The release APK is signed with a debug key so it installs directly. Builds from different machines (or CI runs) use different keys, so uninstall the old app before installing a newer APK from somewhere else. Add your own signing key before publishing to the Play Store.
 
 ## Protocol

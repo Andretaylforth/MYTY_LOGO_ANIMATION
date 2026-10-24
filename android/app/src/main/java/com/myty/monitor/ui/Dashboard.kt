@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -408,8 +409,9 @@ private fun ConnectionOverlay(state: UiState, onChangePc: () -> Unit) {
             )
             Text(
                 if (state.target?.isUsb == true) "Check the cable, USB debugging, and that Myty Monitor is running on the PC."
-                else "Check Myty Monitor is running on the PC and both are on the same network.",
-                color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp,
+                else "Check Myty Monitor is running on the PC and both are on the same Wi-Fi.\n" +
+                    "Test: open http://${state.target?.host}:${state.target?.port} in this phone's browser.",
+                color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
             )
             Button(

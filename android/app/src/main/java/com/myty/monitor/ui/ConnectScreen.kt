@@ -84,13 +84,15 @@ fun ConnectScreen(found: List<Target>, onConnect: (Target) -> Unit) {
             }
 
             Text("Or type the address shown in the PC app", color = Color.White, fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 8.dp))
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().padding(top = 28.dp))
+            Text("Just the numbers before the colon, like 192.168.1.20. The \":5317\" part is optional.",
+                color = White70, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = address,
                     onValueChange = { address = it },
                     singleLine = true,
-                    placeholder = { Text("192.168.1.20", color = White70) },
+                    placeholder = { Text("e.g. 192.168.1.20", color = White70) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                     keyboardActions = KeyboardActions(onGo = { manual?.let(onConnect) }),
                     colors = OutlinedTextFieldDefaults.colors(
