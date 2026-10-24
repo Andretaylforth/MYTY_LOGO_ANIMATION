@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/myty_logo"
+        android:fillType="evenOdd"
+        android:pathData="M40.36,32 H67.64 A8.36,8.36 0 0 1 76,40.36 V67.64 A8.36,8.36 0 0 1 67.64,76 H40.36 A8.36,8.36 0 0 1 32,67.64 V40.36 A8.36,8.36 0 0 1 40.36,32 Z M35.52,43.88 A8.36,8.36 0 1 0 52.24,43.88 A8.36,8.36 0 1 0 35.52,43.88 Z M35.52,64.12 A8.36,8.36 0 1 0 52.24,64.12 A8.36,8.36 0 1 0 35.52,64.12 Z M55.76,43.88 A8.36,8.36 0 1 0 72.48,43.88 A8.36,8.36 0 1 0 55.76,43.88 Z M55.76,64.12 A8.36,8.36 0 1 0 72.48,64.12 A8.36,8.36 0 1 0 55.76,64.12 Z" />
+</vector>
