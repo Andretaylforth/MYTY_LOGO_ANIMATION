@@ -24,7 +24,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myty.monitor.ui.ConnectScreen
-import com.myty.monitor.ui.Dashboard
+import com.myty.monitor.layout.Grid
+import com.myty.monitor.ui.HomeScreen
 import com.myty.monitor.ui.Myty
 import com.myty.monitor.ui.MytyTheme
 
@@ -39,36 +40,42 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        setContent { MytyTheme { App(vm) } }
+        setContent { App(vm) }
     }
 }
 
 @Composable
 private fun App(vm: MonitorViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val look by vm.look.collectAsStateWithLifecycle()
 
-    if (state.target == null) {
-        val found by vm.found.collectAsStateWithLifecycle()
-        ConnectScreen(found, vm::connect)
-        return
-    }
+    MytyTheme(accent = look.accent) {
+        if (state.target == null) {
+            val found by vm.found.collectAsStateWithLifecycle()
+            ConnectScreen(found, vm::connect)
+            return@MytyTheme
+        }
 
-    BackHandler(onBack = vm::disconnect)
-    BoxWithConstraints(Modifier.fillMaxSize().background(Myty.Bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
-        // The dashboard is laid out for a fixed design size and scaled to fill the screen,
-        // so it looks the same on a small phone and a big tablet.
-        val landscape = maxWidth > maxHeight
-        val (baseW, baseH) = if (landscape) 780f to 430f else 400f to 820f
-        val scale = minOf(maxWidth.value / baseW, maxHeight.value / baseH).coerceIn(0.7f, 2.5f)
-        val density = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(density.density * scale, fontScale = 1f)) {
-            Dashboard(
-                state = state,
-                landscape = landscape,
-                onToggleGauge = vm::toggleGauge,
-                onSort = vm::sortBy,
-                onChangePc = vm::disconnect,
-            )
+        BackHandler(onBack = vm::disconnect)
+        BoxWithConstraints(Modifier.fillMaxSize().background(Myty.Bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
+            // Laid out for a fixed design size and scaled to fill the screen,
+            // so text and buttons look the same on a small phone and a big tablet.
+            val landscape = maxWidth > maxHeight
+            val (baseW, baseH) = if (landscape) 780f to 400f else 400f to 800f
+            val scale = minOf(maxWidth.value / baseW, maxHeight.value / baseH).coerceIn(0.7f, 2.5f)
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density * scale, fontScale = 1f)) {
+                HomeScreen(
+                    state = state,
+                    grid = if (landscape) Grid.Landscape else Grid.Portrait,
+                    tiles = if (landscape) look.landscape else look.portrait,
+                    customColors = look.custom,
+                    onTiles = { vm.setTiles(landscape, it) },
+                    onAccent = vm::setAccent,
+                    onCustomColor = vm::setCustomColor,
+                    onChangePc = vm::disconnect,
+                )
+            }
         }
     }
 }

@@ -124,7 +124,7 @@ public sealed class MainForm : Form
 
         body.Controls.Add(MakeCard("Wi-Fi", 128, _addresses, _wifiHint));
         body.Controls.Add(MakeCard("USB cable", 104, _usb, _usbHint));
-        body.Controls.Add(MakeCard("Live", 94, _live, _clients));
+        body.Controls.Add(MakeCard("Live", 112, _live, _clients));
 
         var startup = MakeCheck("Start with Windows", SystemSetup.IsStartupEnabled());
         startup.CheckedChanged += (_, _) => SystemSetup.SetStartup(startup.Checked);
@@ -209,6 +209,12 @@ public sealed class MainForm : Form
         _live.Text = s == null ? "Reading sensors…"
             : $"CPU  {Fmt(s.Cpu.Temp, "°C")}   {Fmt(s.Cpu.Load, "%")}        " +
               $"GPU  {Fmt(s.Gpu?.Temp, "°C")}   {Fmt(s.Gpu?.Load, "%")}";
+
+        if (s != null && s.Gpus.Count > 1)
+        {
+            var others = string.Join(", ", s.Gpus.Skip(1).Select(g => g.Integrated ? $"{g.Name} (integrated)" : g.Name));
+            _live.Text += $"\nGPU: {s.Gpus[0].Name}   ·   ignoring {others}";
+        }
 
         var clients = _server.ActiveClients();
         _clients.Text = clients.Count == 0 ? "No phone connected yet"

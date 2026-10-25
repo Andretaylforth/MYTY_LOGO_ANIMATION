@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using LibreHardwareMonitor.Hardware;
@@ -36,8 +37,11 @@ public sealed class HardwareSampler : IDisposable
 
         var all = _computer.Hardware.ToList();
         var cpuHw = all.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
-        var gpuHw = all.FirstOrDefault(h => h.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd)
-                    ?? all.FirstOrDefault(h => h.HardwareType == HardwareType.GpuIntel);
+        var gpus = all.Where(h => h.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
+            .OrderBy(IsIntegrated)                      // dedicated cards first
+            .ThenByDescending(h => DedicatedMemory(h) ?? 0) // then the one with the most VRAM
+            .ToList();
+        var gpuHw = gpus.FirstOrDefault();
 
         var gpuByPid = _gpuProcs.Sample();
 
@@ -47,6 +51,7 @@ public sealed class HardwareSampler : IDisposable
             Time: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             Cpu: ReadCpu(cpuHw, all),
             Gpu: gpuHw == null ? null : ReadGpu(gpuHw),
+            Gpus: gpus.Select(g => new GpuInfo(g.Name, IsIntegrated(g))).ToList(),
             Ram: ReadRam(),
             Net: ReadNet(),
             Drives: ReadDrives(),
@@ -111,6 +116,25 @@ public sealed class HardwareSampler : IDisposable
                     ?? fans.FirstOrDefault(s => s.Name.Contains("Pump", StringComparison.OrdinalIgnoreCase));
         return (named ?? fans.FirstOrDefault())?.Value;
     }
+
+    /// <summary>
+    /// Ryzen and Intel CPUs often have an integrated GPU as well as the graphics card, and both are reported.
+    /// LibreHardwareMonitor doesn't say which is which for AMD, so go by the name, then by dedicated memory.
+    /// </summary>
+    internal static bool IsIntegrated(IHardware gpu)
+    {
+        if (gpu.HardwareType == HardwareType.GpuNvidia) return false;
+        if (gpu.HardwareType == HardwareType.GpuIntel) return gpu.GetType().Name.Contains("Integrated");
+        var name = gpu.Name;
+        // Graphics cards: "Radeon RX 7900 XTX", "Radeon Pro W7800", "Radeon VII".
+        if (Regex.IsMatch(name, @"\bRX\b|Radeon Pro|Radeon VII|FirePro|Instinct", RegexOptions.IgnoreCase)) return false;
+        // Integrated: "AMD Radeon(TM) Graphics", "Radeon 780M Graphics", "Radeon 890M", "Radeon Vega 8 Graphics".
+        if (Regex.IsMatch(name, @"Graphics\s*$|\b\d{3,4}M\b|\bVega\b", RegexOptions.IgnoreCase)) return true;
+        return (DedicatedMemory(gpu) ?? 0) < 2048;
+    }
+
+    private static double? DedicatedMemory(IHardware gpu) =>
+        Find(gpu, SensorType.SmallData, "GPU Memory Total", "D3D Dedicated Memory Total");
 
     private static GpuStats ReadGpu(IHardware gpu)
     {

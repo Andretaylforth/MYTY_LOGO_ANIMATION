@@ -29,6 +29,8 @@ public sealed record NetStats(double Down, double Up); // bytes/s
 
 public sealed record DriveStats(string Name, string Label, long Used, long Total); // bytes
 
+public sealed record GpuInfo(string Name, bool Integrated);
+
 public sealed record ProcStats(string Name, double Cpu, double Gpu, long Ram); // %, %, bytes
 
 public sealed record Snapshot(
@@ -36,7 +38,8 @@ public sealed record Snapshot(
     string Host,
     long Time,
     CpuStats Cpu,
-    GpuStats? Gpu,
+    GpuStats? Gpu,            // the dedicated card when there is one
+    IReadOnlyList<GpuInfo> Gpus, // every GPU found, best first
     RamStats Ram,
     NetStats Net,
     IReadOnlyList<DriveStats> Drives,

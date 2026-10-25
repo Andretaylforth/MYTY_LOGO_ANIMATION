@@ -2,7 +2,7 @@
 
 Live PC stats (CPU and GPU temperatures, load, clocks, fans, RAM, network, storage, top processes) shown fullscreen on your phone in the Myty bento style.
 
-![Dashboard](docs/dashboard.png)
+![Home screen](docs/home.png)
 
 It has two parts:
 
@@ -55,16 +55,38 @@ There are two ways to connect over a cable:
 - **USB debugging (recommended):** turn on Developer options on the phone (tap *Build number* 7 times in *Settings → About phone*), turn on **USB debugging**, then plug the phone in and accept the prompt. The PC app runs `adb reverse` for you, and the phone shows the PC as **USB**. This needs `adb.exe`: either put [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) next to `MytyMonitor.exe` (as `adb.exe` or in a `platform-tools` folder), or have it on your PATH. If you have Android Studio installed it's found automatically.
 - **USB tethering (no developer options):** plug in the phone and turn on *Settings → Network → Hotspot & tethering → USB tethering*. The PC now shares a network with the phone over the cable, and it shows up in the list like it does on Wi-Fi.
 
-## The dashboard
+## The home screen
 
-- **CPU / GPU**: ring gauge, plus bars for temperature, clock and fan. Tap a card, or use the `•••` menu, to switch the gauges between **load** and **temperature**. Temperature colours go from blue to amber to red as the part heats up. The GPU card also shows hot-spot temperature, power and VRAM when the card reports them.
-- **RAM, Network** (with a 60-second graph), **Storage** (every fixed drive), and **Top Processes**. Tap CPU / GPU / RAM in the table header to sort.
-- Works in landscape (as in the screenshot) and portrait, and scales to fit any phone or tablet. The screen stays on, and the layout shifts by a couple of pixels each minute to avoid OLED burn-in.
-- Press Back to disconnect and choose a different PC.
+The phone shows a grid of live tiles, inspired by Windows Phone. The grid is 4 columns × 4 half-rows in landscape, and 2 × 8 in portrait; each orientation keeps its own layout.
+
+- **Tiles**: CPU, GPU, RAM, Network, Storage and Processes. CPU and GPU tiles show temperature; the RAM tile shows memory use.
+- **Sizes**: tiny (1 × ½), small (1 × 1), wide (2 × 1) and large (2 × 2).
+- **Styles** for CPU, GPU and RAM: 1 ring, 2 fill, 3 orbiting ball, 4 dot grid.
+
+![Tile styles](docs/tile-styles.png)
+
+- **Long-press a tile** and it shrinks slightly and shows its corner buttons:
+  - top-left (number): next style
+  - top-right (×): close the tile; its space stays empty
+  - bottom-right (arrows): next size, smallest to biggest and back round
+  - bottom-left (dot): open the Colours menu
+- **Tap anywhere else** to put the tile back to normal.
+- **Long-press and drag** to move a tile. Tiles in the way jump into the space it left. If they don't fit there, they shrink to make room (for example, a large tile halves). Tiles next to the gap slide over to fill it. Let go to drop it.
+- **Swipe left or right** to open the menu on the other side of the screen:
+  - **Tiles** adds a tile. It goes into an empty gap if there is one, otherwise onto the visible half of the screen, shrinking tiles there to fit.
+  - **Colours** changes the highlight colour (everything blue). The three `+` slots hold your own colours: tap an empty one to create a colour, tap a filled one to use it, or long-press it to edit it. The first slot starts with the default Myty blue.
+  - **Change PC** is on the menu's first page.
+
+![Menus](docs/menus.png)
+
+The screen stays on, and the layout shifts by a couple of pixels each minute to avoid OLED burn-in. Press Back to disconnect and choose a different PC.
+
+The font is [Departure Mono](https://departuremono.com) (SIL Open Font License, see `android/FONT_LICENSE-DepartureMono.txt`). To use a different font, replace `android/app/src/main/res/font/departure_mono.otf`.
 
 ## Notes and limits
 
 - Sensors are read with [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor). Anything a sensor doesn't report shows as `--`. If CPU temperature or fans show `--` even when running as admin, the hardware driver probably isn't installed: recent LibreHardwareMonitor versions use **PawnIO**. Installing PawnIO (the LibreHardwareMonitor app offers to do it) normally fixes this.
+- **GPU**: when the PC has both an integrated GPU (e.g. the Radeon graphics in a Ryzen CPU) and a graphics card, the card is used. The PC window shows which GPU was picked and which were ignored.
 - **CPU fan** is the first motherboard fan header named "CPU" or "Pump", or else the first one spinning. Many motherboards label headers only as "Fan #1, #2…", so on those boards the reading may come from a different fan.
 - **Per-process GPU %** uses the same Windows counters as Task Manager. Per-process network usage isn't shown, because Windows has no cheap way to read it.
 - The PC app serves read-only stats over plain HTTP on whatever network the PC is on (including ones Windows marks as Public), so anyone on the same network can read them, including process names. Quit it from the tray on networks you don't trust.

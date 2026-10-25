@@ -6,59 +6,69 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.dp
+import com.myty.monitor.R
 
 object Myty {
-    val Blue = Color(0xFF002A8C)      // brand blue from the Myty logo
-    val BlueBright = Color(0xFF4D7CFF) // brand blue lifted for use on dark backgrounds
-    val Logo = Color(0xFFF0F0F0)
+    val Bg = Color(0xFF000000)
+    val Tile = Color(0xFF191919)
+    val White = Color(0xFFFFFFFF)
+    val Dim = Color(0xFF8F8F8F)
+    val Track = Color(0xFF2E2E2E)
 
-    val Bg = Color(0xFF111215)
-    val Card = Color(0xFF1B1C20)
-    val Border = Color(0xFF2A2C32)
-    val Track = Color(0xFF2B2D34)
-    val Bar = Color(0xFF6C7080)
-    val Text = Color(0xFFE8E9EE)
-    val Dim = Color(0xFF8A8D96)
-    val Faint = Color(0xFF55585F)
+    /** Default highlight colour; the user can change it from the Colours menu. */
+    val Blue = Color(0xFF001FFF)
 
-    val Warm = Color(0xFFFFC857)
-    val Orange = Color(0xFFFF8A3D)
-    val Hot = Color(0xFFFF5A5F)
+    /** The brand blue from the logo animation (connect screen and app icon). */
+    val Brand = Color(0xFF002A8C)
 
-    /** Cool blue → amber → red as a component heats up. */
-    fun heat(tempC: Double?): Color {
-        val t = tempC ?: return Bar
-        return when {
-            t < 60 -> BlueBright
-            t < 80 -> lerp(Warm, Orange, ((t - 60) / 20).toFloat())
-            t < 92 -> lerp(Orange, Hot, ((t - 80) / 12).toFloat())
-            else -> Hot
-        }
-    }
+    /** Colour swatches on the Colours page, in order. */
+    val Palette = listOf(
+        0xFFFFFFFF, 0xFFE5E1C3, 0xFFCCCCCC, 0xFF8F8F8F, 0xFF3D3D3D, 0xFF000000,
+        0xFF01FE98, 0xFF2E7D32, 0xFFE0A870, 0xFFFF6700, 0xFFFF0C00, 0xFF0A0192,
+        0xFFFAFF01, 0xFFCCFF7B,
+    ).map { Color(it) }
+
+    val Font = FontFamily(Font(R.font.departure_mono))
+
+    val Radius = 16.dp
+    val Gap = 10.dp
 }
 
+/** The user's highlight colour. Everything blue in the design uses this. */
+val LocalAccent = staticCompositionLocalOf { Myty.Blue }
+
+/** Readable text/icon colour on top of [c]. */
+fun onColor(c: Color) = if (c.luminance() > 0.5f) Color.Black else Color.White
+
 @Composable
-fun MytyTheme(content: @Composable () -> Unit) {
+fun MytyTheme(accent: Color = Myty.Blue, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Myty.BlueBright,
-            onPrimary = Color.White,
+            primary = accent,
+            onPrimary = onColor(accent),
             background = Myty.Bg,
-            surface = Myty.Card,
-            onSurface = Myty.Text,
-            onBackground = Myty.Text,
+            surface = Myty.Tile,
+            onSurface = Myty.White,
+            onBackground = Myty.White,
         ),
     ) {
-        // Tight line heights: the bento cards are dense and Material's 24sp default wastes space.
         CompositionLocalProvider(
+            LocalAccent provides accent,
             LocalTextStyle provides TextStyle(
+                fontFamily = Myty.Font,
+                color = Myty.White,
                 lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
             ),
             content = content,
@@ -68,11 +78,11 @@ fun MytyTheme(content: @Composable () -> Unit) {
 
 /** The Myty mark: rounded square with four round holes. [holes] should match whatever is behind it. */
 @Composable
-fun MytyLogo(modifier: Modifier, color: Color = Myty.Logo, holes: Color = Myty.Blue) {
+fun MytyLogo(modifier: Modifier, color: Color = Myty.White, holes: Color = Myty.Brand) {
     Canvas(modifier) {
         val s = size.minDimension
         val o = Offset((size.width - s) / 2, (size.height - s) / 2)
-        drawRoundRect(color, o, androidx.compose.ui.geometry.Size(s, s), CornerRadius(s * 0.19f))
+        drawRoundRect(color, o, Size(s, s), CornerRadius(s * 0.19f))
         val r = s * 0.19f
         val inset = s * 0.27f
         for (x in floatArrayOf(inset, s - inset)) for (y in floatArrayOf(inset, s - inset)) {
