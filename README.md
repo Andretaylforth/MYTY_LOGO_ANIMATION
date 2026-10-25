@@ -69,7 +69,6 @@ The phone shows a grid of live tiles, inspired by Windows Phone. The grid is 4 c
   - top-left (number): next style
   - top-right (×): close the tile; its space stays empty
   - bottom-right (arrows): next size, smallest to biggest and back round
-  - bottom-left (dot): open the Colours menu
 - **Tap anywhere else** to put the tile back to normal.
 - **Long-press and drag** to move a tile. Tiles in the way jump into the space it left. If they don't fit there, they shrink to make room (for example, a large tile halves). Tiles next to the gap slide over to fill it. Let go to drop it.
 - **Swipe left or right** to open the menu on the other side of the screen:

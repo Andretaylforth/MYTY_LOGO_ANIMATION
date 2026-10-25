@@ -176,10 +176,6 @@ fun HomeScreen(
                 onStyle = { onTiles(TileLayout.cycleStyle(tiles, tile.id)) },
                 onClose = { selected = null; closing = closing + tile.id },
                 onResize = { onTiles(TileLayout.resize(tiles, grid, tile.id)) },
-                onColours = {
-                    val left = tile.col + tile.size.w / 2f <= grid.cols / 2f
-                    openMenu(if (left) MenuSide.Right else MenuSide.Left, MenuPage.Colours)
-                },
                 // Restart the detector if the grid changes (rotation) so it never uses stale cell sizes.
                 gestures = Modifier.pointerInput(tile.id, grid, cellW, cellH) {
                     detectDragGesturesAfterLongPress(
@@ -266,7 +262,6 @@ private fun TileHost(
     onStyle: () -> Unit,
     onClose: () -> Unit,
     onResize: () -> Unit,
-    onColours: () -> Unit,
     gestures: Modifier,
 ) {
     val x = remember { Animatable(rect.left) }
@@ -307,34 +302,27 @@ private fun TileHost(
     ) {
         TileContent(tile, data, chrome = !selected, modifier = Modifier.fillMaxSize())
         AnimatedVisibility(selected, Modifier.matchParentSize(), enter = fadeIn(), exit = fadeOut()) {
-            CornerButtons(tile, onStyle, onClose, onResize, onColours)
+            CornerButtons(tile, onStyle, onClose, onResize)
         }
     }
 }
 
 @Composable
-internal fun CornerButtons(tile: Tile, onStyle: () -> Unit, onClose: () -> Unit, onResize: () -> Unit, onColours: () -> Unit) {
+internal fun CornerButtons(tile: Tile, onStyle: () -> Unit, onClose: () -> Unit, onResize: () -> Unit) {
     val accent = LocalAccent.current
     val tiny = tile.size == TileSize.Tiny
-    val s = if (tiny) 20.dp else 26.dp
-    // On the fill style the left-hand buttons sit on the highlight colour.
+    val s = 18.dp
+    // On the fill style the style button sits on the highlight colour.
     val leftColor = if (tile.style == 2 && tile.kind.styles > 1) onColor(accent) else Myty.White
-    Box(Modifier.fillMaxSize().padding(if (tiny) 6.dp else 10.dp)) {
+    Box(Modifier.fillMaxSize().padding(if (tiny) 4.dp else 6.dp)) {
         if (tile.kind.styles > 1) {
             CircleIcon(Glyph.None, leftColor, s, Modifier.align(Alignment.TopStart).clickable(onClick = onStyle),
-                label = tile.style.toString())
+                label = tile.style.toString(), description = "Change style")
         }
-        CircleIcon(Glyph.Close, Myty.White, s, Modifier.align(Alignment.TopEnd).clickable(onClick = onClose))
-        CircleIcon(Glyph.Resize, Myty.White, s, Modifier.align(Alignment.BottomEnd).clickable(onClick = onResize))
-        if (!tiny) {
-            Box(
-                Modifier.align(Alignment.BottomStart).size(s).clip(CircleShape)
-                    .background(if (leftColor == Myty.White) accent else Color.Transparent)
-                    .clickable(onClick = onColours),
-            ) {
-                if (leftColor != Myty.White || accent == Myty.Tile) CircleIcon(Glyph.None, leftColor, s)
-            }
-        }
+        CircleIcon(Glyph.Close, Myty.White, s, Modifier.align(Alignment.TopEnd).clickable(onClick = onClose),
+            description = "Remove tile")
+        CircleIcon(Glyph.Resize, Myty.White, s, Modifier.align(Alignment.BottomEnd).clickable(onClick = onResize),
+            description = "Resize tile")
     }
 }
 

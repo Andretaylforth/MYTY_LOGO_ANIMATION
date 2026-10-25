@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,7 +40,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -112,24 +117,32 @@ fun TileContent(tile: Tile, data: TileData, chrome: Boolean, modifier: Modifier 
 
 // ---- Shared pieces -------------------------------------------------------------------------------
 
-private fun labelSize(size: TileSize) = if (size == TileSize.Tiny) 10.sp else 12.sp
-private fun pad(size: TileSize): Dp = if (size == TileSize.Tiny) 8.dp else 12.dp
+@Suppress("UNUSED_PARAMETER")
+private fun labelSize(size: TileSize) = 10.sp
+private fun pad(size: TileSize): Dp = if (size == TileSize.Tiny) 4.dp else 6.dp
 
-/** Corner labels: name top-left, load top-right, model bottom-left. */
+/**
+ * Corner labels: name top-left, load top-right, model bottom-left.
+ * [circle] is the width of a centred gauge; the model name wraps onto two lines only if it would reach it.
+ */
 @Composable
-private fun BoxScope.Labels(size: TileSize, g: Gauge, chrome: Boolean, color: Color = Myty.White, full: Boolean = true) {
+private fun BoxScope.Labels(size: TileSize, g: Gauge, chrome: Boolean, color: Color = Myty.White, circle: Dp? = null) {
     AnimatedVisibility(chrome, Modifier.matchParentSize(), enter = fadeIn(), exit = fadeOut()) {
-        Box(Modifier.fillMaxSize().padding(pad(size))) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(pad(size))) {
+            // On a large tile the gauge sits above the name, so only wide tiles need to dodge it.
+            val nameWidth = if (circle != null && size == TileSize.Wide) {
+                ((maxWidth + pad(size) * 2 - circle) / 2 - pad(size) - 6.dp).coerceAtLeast(40.dp)
+            } else maxWidth
             val fs = labelSize(size)
-            val top = if (full && size == TileSize.Large && g.clock != null) "${g.label}  ${g.clock}" else g.label
+            val top = if (size == TileSize.Large && g.clock != null) "${g.label}  ${g.clock}" else g.label
             Text(top, color = color, fontSize = fs, maxLines = 1, modifier = Modifier.align(Alignment.TopStart))
-            if (full && size.w == 2 && g.load != null) {
+            if (size.w == 2 && g.load != null) {
                 Text(g.load, color = color, fontSize = fs, maxLines = 1, modifier = Modifier.align(Alignment.TopEnd))
             }
-            if (full && size.w == 2 && g.name != null) {
+            if (size.w == 2 && g.name != null) {
                 Text(
                     g.name, color = color, fontSize = fs, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(if (size == TileSize.Large) 1f else 0.4f),
+                    modifier = Modifier.align(Alignment.BottomStart).widthIn(max = nameWidth),
                 )
             }
         }
@@ -147,19 +160,17 @@ private fun TwoTone(splitPx: Float, content: @Composable (inside: Boolean) -> Un
     }
 }
 
-/** Big reading. A trailing "°" is drawn as a ring; the font's pixel degree sign looks like a cross when large. */
+/** Big reading, e.g. "68°". The font is monospaced, so pull the degree sign in against the digits. */
 @Composable
 private fun Value(text: String, fontSize: Float, color: Color = Myty.White, modifier: Modifier = Modifier) {
-    val degree = text.endsWith("°")
-    Row(modifier) {
-        Text(if (degree) text.dropLast(1) else text, color = color, fontSize = fontSize.sp, maxLines = 1)
-        if (degree) {
-            Canvas(Modifier.padding(start = (fontSize * 0.08f).dp, top = (fontSize * 0.12f).dp).size((fontSize * 0.3f).dp)) {
-                val sw = this.size.minDimension * 0.26f
-                drawCircle(color, this.size.minDimension / 2 - sw / 2, style = Stroke(sw))
-            }
-        }
+    val styled = buildAnnotatedString {
+        if (text.endsWith("°") && text.length >= 2) {
+            append(text.dropLast(2))
+            withStyle(SpanStyle(letterSpacing = (-0.3).em)) { append(text[text.length - 2]) }
+            append("°")
+        } else append(text)
     }
+    Text(styled, color = color, fontSize = fontSize.sp, maxLines = 1, softWrap = false, modifier = modifier)
 }
 
 // ---- Style 1: ring -------------------------------------------------------------------------------
@@ -178,8 +189,8 @@ private fun RingTile(size: TileSize, g: Gauge, chrome: Boolean) {
             // Starts at the bottom and runs clockwise as the temperature rises.
             if (f > 0.002f) drawArc(accent, 90f, 360f * f, false, tl, arc, style = Stroke(sw, cap = StrokeCap.Round))
         }
-        Value(g.value, d.value * 0.2f)
-        Labels(size, g, chrome)
+        Value(g.value, d.value * 0.25f)
+        Labels(size, g, chrome, circle = d)
     }
 }
 
@@ -197,12 +208,11 @@ private fun FillTile(size: TileSize, g: Gauge, chrome: Boolean) {
         val fillW = maxWidth * f
         Box(Modifier.fillMaxHeight().width(fillW).clip(RoundedCornerShape(Myty.Radius)).background(accent))
         val split = with(androidx.compose.ui.platform.LocalDensity.current) { fillW.toPx() }
-        val big = minOf(maxWidth.value * 0.24f, maxHeight.value * 0.3f, 96f)
-        val nudge = if (size.w == 2) maxWidth * 0.12f else 0.dp
+        // Same size on every tile width (it's set by one column), so tiles read alike side by side.
+        val big = minOf(maxWidth.value / size.w * 0.25f, maxHeight.value * 0.55f)
         TwoTone(split) { inside ->
             Box(Modifier.fillMaxSize()) {
-                Value(g.value, big, color = if (inside) on else accent,
-                    modifier = Modifier.align(Alignment.Center).offset(x = nudge))
+                Value(g.value, big, color = if (inside) on else accent, modifier = Modifier.align(Alignment.Center))
                 Labels(size, g, chrome, color = if (inside) on else Myty.White)
             }
         }
@@ -224,8 +234,8 @@ private fun OrbitTile(size: TileSize, g: Gauge, chrome: Boolean) {
             val ball = center + Offset((r * cos(a)).toFloat(), (r * sin(a)).toFloat())
             drawCircle(accent, r * 0.16f, ball)
         }
-        Value(g.value, d.value * 0.2f, color = Color.Black)
-        Labels(size, g, chrome)
+        Value(g.value, d.value * 0.22f, color = Color.Black)
+        Labels(size, g, chrome, circle = d)
     }
 }
 
@@ -236,21 +246,29 @@ private fun DotsTile(size: TileSize, g: Gauge, chrome: Boolean) {
     val accent = LocalAccent.current
     val f by animateFloatAsState(g.fraction, springy, label = "dots")
     BoxWithConstraints(Modifier.fillMaxSize().padding(pad(size))) {
-        val cols = if (size.w == 2) 9 else 7
-        val pitch = maxWidth / cols
-        val rows = floor(maxHeight / pitch).toInt().coerceAtLeast(1)
-        // First cell holds the label, first cell of the last row holds the value.
-        val skip = setOf(0, (rows - 1) * cols)
+        // Dot size follows the tile's height, as in the mockups: about 9 rows on large, 4 on wide, 7 on small.
+        val targetRows = when (size) {
+            TileSize.Large -> 9
+            TileSize.Wide -> 4
+            TileSize.Small -> 7
+            TileSize.Tiny -> 3
+        }
+        val pitch = maxHeight / targetRows
+        val cols = floor(maxWidth / pitch).toInt().coerceAtLeast(1)
+        val rows = targetRows
+        // The label takes the first cell, the reading the start of the last row.
+        val valueCells = if (g.value.length > 3) 2 else 1
+        val skip = setOf(0) + (0 until valueCells).map { (rows - 1) * cols + it }
         val total = rows * cols - skip.size
         Canvas(Modifier.fillMaxSize()) {
             val p = pitch.toPx()
             val r = p * 0.36f
             val filled = Math.round(f * total)
             var n = 0
-            val top = (this.size.height - rows * p) / 2
+            val left = (this.size.width - cols * p) / 2
             for (i in 0 until rows * cols) {
                 if (i in skip) continue
-                val c = center.copy(x = (i % cols) * p + p / 2, y = top + (i / cols) * p + p / 2)
+                val c = center.copy(x = left + (i % cols) * p + p / 2, y = (i / cols) * p + p / 2)
                 if (n < filled) drawCircle(accent, r, c) else drawCircle(Myty.White, r - 0.6.dp.toPx(), c, style = Stroke(1.dp.toPx()))
                 n++
             }

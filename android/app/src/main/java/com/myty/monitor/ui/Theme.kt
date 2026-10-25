@@ -43,7 +43,7 @@ object Myty {
     val Font = FontFamily(Font(R.font.departure_mono))
 
     val Radius = 16.dp
-    val Gap = 10.dp
+    val Gap = 5.dp
 }
 
 /** The user's highlight colour. Everything blue in the design uses this. */

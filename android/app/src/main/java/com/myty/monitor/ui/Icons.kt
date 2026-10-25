@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,8 +33,14 @@ fun CircleIcon(
     modifier: Modifier = Modifier,
     label: String? = null,
     fill: Color? = null,
+    description: String? = null,
 ) {
-    Box(modifier.size(size).clip(CircleShape), contentAlignment = Alignment.Center) {
+    Box(
+        modifier.size(size).clip(CircleShape).then(
+            if (description != null) Modifier.semantics { contentDescription = description } else Modifier
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
         Canvas(Modifier.size(size)) {
             val sw = (size.toPx() * 0.05f).coerceAtLeast(1.2f)
             if (fill != null) drawCircle(fill, radius = this.size.minDimension / 2)

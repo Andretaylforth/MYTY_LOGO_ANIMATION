@@ -89,8 +89,7 @@ class GestureTest {
         rule.onRoot().at(0.12f, 0.25f) { longClick(it) } // RAM small
         rule.waitForIdle()
         rule.onNodeWithText("3").assertExists()
-        // Resize is bottom-right of the RAM tile; find it by position: tile spans x 0..~25%, y 0..~50%.
-        rule.onRoot().at(0.215f, 0.43f) { click(it) }
+        rule.onNodeWithContentDescription("Resize tile").performClick()
         rule.waitForIdle()
         assertEquals(TileSize.Wide, tiles.first { it.kind == TileKind.Ram }.size)
     }
@@ -115,7 +114,7 @@ class GestureTest {
         show()
         rule.onRoot().at(0.37f, 0.25f) { longClick(it) } // NETWORK small at col 1
         rule.waitForIdle()
-        rule.onRoot().at(0.47f, 0.07f) { click(it) } // its top-right X
+        rule.onNodeWithContentDescription("Remove tile").performClick()
         rule.mainClock.advanceTimeBy(1000)
         rule.waitForIdle()
         assertEquals(3, tiles.size)
