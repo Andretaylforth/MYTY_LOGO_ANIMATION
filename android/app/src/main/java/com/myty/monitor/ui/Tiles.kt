@@ -185,9 +185,13 @@ private fun TwoTone(splitPx: Float, content: @Composable (inside: Boolean) -> Un
     }
 }
 
-/** Big reading, e.g. "68°". The font is monospaced, so pull the degree sign in against the digits. */
+/**
+ * Big reading, e.g. "68°". The font is monospaced, so pull the degree sign in against the digits.
+ * [centred]: the reading sits in the middle of something; nudge it right so the digits look centred and the
+ * small raised degree sign hangs off them (centring the whole string makes it look off to the left).
+ */
 @Composable
-private fun Value(text: String, fontSize: Float, color: Color = Myty.White, modifier: Modifier = Modifier) {
+private fun Value(text: String, fontSize: Float, color: Color = Myty.White, modifier: Modifier = Modifier, centred: Boolean = false) {
     val styled = buildAnnotatedString {
         if (text.endsWith("°") && text.length >= 2) {
             append(text.dropLast(2))
@@ -195,7 +199,8 @@ private fun Value(text: String, fontSize: Float, color: Color = Myty.White, modi
             append("°")
         } else append(text)
     }
-    Text(styled, color = color, fontSize = fontSize.sp, maxLines = 1, softWrap = false, modifier = modifier)
+    val nudge = if (centred && text.endsWith("°")) (fontSize * 0.22f).dp else 0.dp
+    Text(styled, color = color, fontSize = fontSize.sp, maxLines = 1, softWrap = false, modifier = modifier.offset(x = nudge))
 }
 
 // ---- Style 1: ring -------------------------------------------------------------------------------
@@ -214,7 +219,7 @@ private fun RingTile(size: TileSize, g: Gauge, chrome: Boolean) {
             // Starts at the bottom and runs clockwise as the temperature rises.
             if (f > 0.002f) drawArc(accent, 90f, 360f * f, false, tl, arc, style = Stroke(sw, cap = StrokeCap.Round))
         }
-        Value(g.value, d.value * 0.25f)
+        Value(g.value, d.value * 0.25f, centred = true)
         Labels(size, g, chrome, circle = d)
     }
 }
@@ -235,9 +240,8 @@ private fun FillTile(size: TileSize, g: Gauge, chrome: Boolean) {
         val split = with(androidx.compose.ui.platform.LocalDensity.current) { fillW.toPx() }
         // Same size on every tile width (it's set by one column), so tiles read alike side by side.
         val big = minOf(maxWidth.value / size.w * 0.25f, maxHeight.value * 0.42f)
-        // The reading is always white. It's nudged right so the digits sit in the middle and the
-        // degree sign hangs off them; centring the whole string makes it look off to the left.
-        Value(g.value, big, color = Myty.White, modifier = Modifier.align(Alignment.Center).offset(x = (big * 0.22f).dp))
+        // The reading is always white.
+        Value(g.value, big, color = Myty.White, modifier = Modifier.align(Alignment.Center), centred = true)
         TwoTone(split) { inside ->
             Box(Modifier.fillMaxSize()) {
                 Labels(size, g, chrome, color = if (inside) on else Myty.White)
@@ -261,7 +265,7 @@ private fun OrbitTile(size: TileSize, g: Gauge, chrome: Boolean) {
             val ball = center + Offset((r * cos(a)).toFloat(), (r * sin(a)).toFloat())
             drawCircle(accent, r * 0.16f, ball)
         }
-        Value(g.value, d.value * 0.22f, color = Color.Black)
+        Value(g.value, d.value * 0.22f, color = Color.Black, centred = true)
         Labels(size, g, chrome, circle = d)
     }
 }
@@ -370,7 +374,7 @@ private fun BlockTile(size: TileSize, g: Gauge, chrome: Boolean) {
             val textColor = if (accent.luminance() < 0.03f) Color.White else Color.Black
             Row(Modifier.fillMaxSize()) {
                 Box(Modifier.width(blueW).fillMaxHeight().clip(RoundedCornerShape(corner)).background(accent), contentAlignment = Alignment.Center) {
-                    Value(g.value, fs, color = textColor)
+                    Value(g.value, fs, color = textColor, centred = true)
                 }
                 if (whiteW > 0.dp) {
                     Spacer(Modifier.width(gap))
@@ -537,32 +541,59 @@ private fun rate(b: Double?): String {
 
 // ---- Storage -------------------------------------------------------------------------------------
 
+/**
+ * Space the corner buttons need while they show, measured inside the tile's padding: rows above and below
+ * on tall tiles (small, large), columns either side on short ones (wide, tiny).
+ */
+private fun buttonClearance(size: TileSize): Dp = buttonPad(size) + buttonSize(size) + 4.dp - pad(size)
+private fun isShort(size: TileSize) = size == TileSize.Wide || size == TileSize.Tiny
+
+/** Every drive with a usage bar. When there isn't room for one per row they go into two columns. */
 @Composable
 private fun StorageTile(size: TileSize, s: Stats?, chrome: Boolean) {
     val accent = LocalAccent.current
+    val tiny = size == TileSize.Tiny
+    val short = isShort(size)
+    val clear = buttonClearance(size)
+    val head by animateDpAsState(if (chrome) (if (tiny) 16.dp else 22.dp) else if (short) 0.dp else clear, label = "diskTop")
+    val bottom by animateDpAsState(if (chrome || short) 0.dp else clear, label = "diskBottom")
+    val side by animateDpAsState(if (!chrome && short) clear else 0.dp, label = "diskSide")
     BoxWithConstraints(Modifier.fillMaxSize().padding(pad(size))) {
         val drives = s?.drives.orEmpty()
-        val head = if (chrome) 22.dp else 0.dp
-        val rowH = 30.dp
-        val fit = ((maxHeight - head) / rowH).toInt().coerceAtLeast(1)
-        Column(Modifier.fillMaxSize().padding(top = head), verticalArrangement = Arrangement.SpaceEvenly) {
-            drives.take(fit).forEach { d ->
-                val frac = if (d.total > 0) d.used.toFloat() / d.total else 0f
-                val shown by animateFloatAsState(frac, springy, label = "drive")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(d.name.trimEnd('\\', ':'), fontSize = labelSize(size), modifier = Modifier.width(22.dp))
-                    Box(Modifier.weight(1f).height(if (size == TileSize.Tiny) 8.dp else 14.dp).clip(RoundedCornerShape(4.dp)).background(Myty.Track)) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(shown).background(if (frac > 0.92f) Color(0xFFFF0C00) else accent))
+        val area = maxHeight - head - bottom
+        val minRow = if (tiny) 13.dp else 20.dp
+        val cols = if (drives.size > 1 && (area / drives.size < minRow || (tiny && drives.size >= 4))) 2 else 1
+        val rows = ((drives.size + cols - 1) / cols).coerceAtLeast(1)
+        val rowH = (area / rows).coerceAtMost(30.dp)
+        val fs = if (tiny || rowH < 18.dp) 10.sp else labelSize(size)
+        val barH = (rowH * 0.45f).coerceIn(4.dp, 14.dp)
+        Column(
+            Modifier.fillMaxSize().padding(top = head, bottom = bottom, start = side, end = side),
+            verticalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            drives.chunked(cols).forEach { line ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    line.forEach { d ->
+                        val frac = if (d.total > 0) d.used.toFloat() / d.total else 0f
+                        val shown by animateFloatAsState(frac, springy, label = "drive")
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Text(d.name.trimEnd('\\', ':'), fontSize = fs, modifier = Modifier.width(if (tiny) 14.dp else 22.dp))
+                            Box(Modifier.weight(1f).height(barH).clip(RoundedCornerShape(4.dp)).background(Myty.Track)) {
+                                Box(Modifier.fillMaxHeight().fillMaxWidth(shown).background(accent))
+                            }
+                            if (size.w == 2 && cols == 1) {
+                                Text("${tb(d.used)}/${tb(d.total)}", fontSize = fs, color = Myty.Dim,
+                                    modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
                     }
-                    if (size.w == 2) {
-                        Text("${tb(d.used)}/${tb(d.total)}", fontSize = labelSize(size), color = Myty.Dim,
-                            modifier = Modifier.padding(start = 8.dp))
-                    }
+                    // Keep a lone drive in the last line the same width as the others.
+                    repeat(cols - line.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
         AnimatedVisibility(chrome, Modifier.align(Alignment.TopStart), enter = fadeIn(), exit = fadeOut()) {
-            Text(if (size == TileSize.Tiny) "DISK" else "STORAGE", fontSize = labelSize(size))
+            Text(if (tiny) "DISK" else "STORAGE", fontSize = labelSize(size))
         }
     }
 }
@@ -578,12 +609,17 @@ private fun tb(bytes: Long): String {
 private fun ProcessTile(size: TileSize, s: Stats?, chrome: Boolean, byRam: Boolean) {
     val accent = LocalAccent.current
     BoxWithConstraints(Modifier.fillMaxSize().padding(pad(size))) {
-        val head = if (chrome) 22.dp else 0.dp
+        // While the corner buttons show, leave room above and below so no row runs into them.
+        val clear = buttonClearance(size)
+        val short = isShort(size)
+        val head = if (chrome) 22.dp else if (short) 0.dp else clear
+        val foot = if (chrome || short) 0.dp else clear
+        val side = if (!chrome && short) clear else 0.dp
         val rowH = if (size == TileSize.Tiny) 16.dp else 22.dp
-        val fit = ((maxHeight - head) / rowH).toInt().coerceAtLeast(1)
+        val fit = ((maxHeight - head - foot) / rowH).toInt().coerceAtLeast(1)
         val procs = s?.procs.orEmpty().sortedByDescending { if (byRam) it.ram.toDouble() else it.cpu }.take(fit)
         val top = procs.maxOfOrNull { it.cpu }?.coerceAtLeast(1.0) ?: 1.0
-        Column(Modifier.fillMaxSize().padding(top = head)) {
+        Column(Modifier.fillMaxSize().padding(top = head, start = side, end = side)) {
             procs.forEach { p ->
                 Row(Modifier.height(rowH), verticalAlignment = Alignment.CenterVertically) {
                     Text(p.name.uppercase(), fontSize = labelSize(size), maxLines = 1, overflow = TextOverflow.Ellipsis,
