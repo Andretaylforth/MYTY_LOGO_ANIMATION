@@ -1,6 +1,9 @@
 package com.myty.monitor
 
+import android.os.Build
 import android.os.Bundle
+import android.view.RoundedCorner
+import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -17,7 +20,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import kotlin.math.sqrt
 import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -63,10 +71,13 @@ private fun App(vm: MonitorViewModel) {
             val (baseW, baseH) = if (landscape) 780f to 400f else 400f to 800f
             val scale = minOf(maxWidth.value / baseW, maxHeight.value / baseH).coerceIn(0.7f, 2.5f)
             val density = LocalDensity.current
+            val view = LocalView.current
+            val cornerPx = remember(landscape) { screenCornerRadius(view) }
             CompositionLocalProvider(LocalDensity provides Density(density.density * scale, fontScale = 1f)) {
                 HomeScreen(
                     state = state,
                     portrait = !landscape,
+                    edge = edgeForCorners(cornerPx / (density.density * scale)),
                     tiles = look.tiles,
                     customColors = look.custom,
                     onTiles = vm::setTiles,
@@ -77,4 +88,27 @@ private fun App(vm: MonitorViewModel) {
             }
         }
     }
+}
+
+/** Radius of the screen's rounded corners in px, or 0 if the phone doesn't say (before Android 12). */
+private fun screenCornerRadius(view: View): Int {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return 0
+    val display = view.display ?: return 0
+    return listOf(
+        RoundedCorner.POSITION_TOP_LEFT, RoundedCorner.POSITION_TOP_RIGHT,
+        RoundedCorner.POSITION_BOTTOM_LEFT, RoundedCorner.POSITION_BOTTOM_RIGHT,
+    ).maxOf { display.getRoundedCorner(it)?.radius ?: 0 }
+}
+
+/**
+ * How far in from the screen edge the tiles must sit so rounded screen corners don't cut into them.
+ * A tile corner of radius r at inset d clears a screen corner of radius R when d >= (R - r)(1 - 1/sqrt 2);
+ * its corner text (12dp in) clears it when d >= R(1 - 1/sqrt 2) - 12dp. Plus a little for the burn-in shift.
+ */
+private fun edgeForCorners(screenRadiusDp: Float): Dp {
+    if (screenRadiusDp <= 0f) return Myty.Gap
+    val k = 1f - 1f / sqrt(2f)
+    val forTile = (screenRadiusDp - Myty.Radius.value) * k
+    val forText = screenRadiusDp * k - 12f
+    return maxOf(Myty.Gap.value, maxOf(forTile, forText) + 4f).dp
 }

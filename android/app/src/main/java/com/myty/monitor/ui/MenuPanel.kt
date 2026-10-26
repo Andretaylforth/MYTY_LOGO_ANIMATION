@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.myty.monitor.UiState
@@ -119,6 +120,11 @@ private fun RootPage(state: UiState, onPage: (MenuPage) -> Unit, onChangePc: () 
         )
         Pill("CHANGE PC", onChangePc, filled = false, modifier = Modifier.padding(start = 2.dp))
         Spacer(Modifier.weight(1f))
+        val context = LocalContext.current
+        val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() }
+        if (version != null) {
+            Text("VERSION $version", color = Ink.copy(alpha = 0.4f), fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+        }
         Row(Modifier.fillMaxWidth().fillMaxHeight(0.62f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MenuCard("TILES", Glyph.Plus, Modifier.weight(1f)) { onPage(MenuPage.Tiles) }
             MenuCard("COLOURS", Glyph.Dropper, Modifier.weight(1f)) { onPage(MenuPage.Colours) }

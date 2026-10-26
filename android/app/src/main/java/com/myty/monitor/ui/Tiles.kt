@@ -219,9 +219,11 @@ private fun FillTile(size: TileSize, g: Gauge, chrome: Boolean) {
         val split = with(androidx.compose.ui.platform.LocalDensity.current) { fillW.toPx() }
         // Same size on every tile width (it's set by one column), so tiles read alike side by side.
         val big = minOf(maxWidth.value / size.w * 0.25f, maxHeight.value * 0.42f)
+        // The reading is always white. It's nudged right so the digits sit in the middle and the
+        // degree sign hangs off them; centring the whole string makes it look off to the left.
+        Value(g.value, big, color = Myty.White, modifier = Modifier.align(Alignment.Center).offset(x = (big * 0.22f).dp))
         TwoTone(split) { inside ->
             Box(Modifier.fillMaxSize()) {
-                Value(g.value, big, color = if (inside) on else accent, modifier = Modifier.align(Alignment.Center))
                 Labels(size, g, chrome, color = if (inside) on else Myty.White)
             }
         }

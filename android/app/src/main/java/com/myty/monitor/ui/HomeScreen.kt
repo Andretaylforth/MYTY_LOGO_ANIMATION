@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,6 +85,8 @@ fun HomeScreen(
     onAccent: (Color) -> Unit,
     onCustomColor: (Int, Color) -> Unit,
     onChangePc: () -> Unit,
+    /** Space around the grid; more than the usual gap on phones with big rounded screen corners. */
+    edge: Dp = Myty.Gap,
 ) {
     val haptics = LocalHapticFeedback.current
     val grid = Grid.Main
@@ -152,7 +155,7 @@ fun HomeScreen(
                     },
                 )
             }
-            .padding(Myty.Gap)
+            .padding(edge)
             .offset(shift.x.dp, shift.y.dp),
     ) {
         val density = LocalDensity.current
@@ -342,7 +345,8 @@ private fun TileHost(
                 shape = RoundedCornerShape(Myty.Radius)
                 clip = false
             }
-            .then(gestures),
+            .then(gestures)
+            .semantics { contentDescription = "${tile.kind.label} tile, style ${tile.style}, ${tile.size.name.lowercase()}" },
     ) {
         TileContent(tile, data, chrome = !selected, modifier = Modifier.fillMaxSize())
         AnimatedVisibility(selected, Modifier.matchParentSize(), enter = fadeIn(), exit = fadeOut()) {
