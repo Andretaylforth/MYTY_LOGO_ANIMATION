@@ -35,6 +35,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -122,7 +125,8 @@ fun TileContent(tile: Tile, data: TileData, chrome: Boolean, modifier: Modifier 
                     3 -> OrbitTile(tile.size, g, chrome)
                     4 -> DotsTile(tile.size, g, chrome)
                     5 -> BlockTile(tile.size, g, chrome)
-                    6 -> CoresTile(tile.size, g, data.stats?.cpu?.cores.orEmpty(), tile.alt, chrome)
+                    // The per-core tile keeps showing temperature in its label; a tap switches the bars to MHz.
+                    6 -> CoresTile(tile.size, gaugeFor(tile.kind, data.stats, alt = false), data.stats?.cpu?.cores.orEmpty(), tile.alt, chrome)
                     else -> RingTile(tile.size, g, chrome)
                 }
             }
@@ -394,32 +398,45 @@ private fun BoxScope.BlockLabels(size: TileSize, g: Gauge, chrome: Boolean) {
 // ---- Style 6: per-core bars ----------------------------------------------------------------------
 
 /**
- * One rounded bar per CPU core, its height set by that core's temperature (or load once tapped).
- * Where the CPU doesn't report per-core temperatures (most Ryzens), the bars show each core's clock.
+ * One rounded bar per CPU core: its temperature, or its clock in MHz once tapped. Ryzens only measure
+ * temperature per CCD (chiplet), so there each core shows its CCD's temperature and the label says so.
  */
 @Composable
-private fun CoresTile(size: TileSize, g: Gauge, cores: List<com.myty.monitor.data.CoreStats>, alt: Boolean, chrome: Boolean) {
+private fun CoresTile(size: TileSize, g: Gauge, cores: List<com.myty.monitor.data.CoreStats>, showClock: Boolean, chrome: Boolean) {
     val accent = LocalAccent.current
     val on = onColor(accent)
     val measurer = rememberTextMeasurer()
-    val hasTemps = cores.any { it.temp != null }
-    val peakClock = cores.maxOfOrNull { it.clock ?: 0.0 }?.coerceAtLeast(1.0) ?: 1.0
-    val values: List<Pair<Float, String>> = cores.map { c ->
-        when {
-            alt -> ((c.load ?: 0.0) / 100).toFloat() to pct(c.load)
-            hasTemps -> ((c.temp ?: 0.0) / 100).toFloat() to deg(c.temp)
-            else -> ((c.clock ?: 0.0) / peakClock).toFloat() to (c.clock?.let { String.format(Locale.US, "%.1f", it / 1000) } ?: "--")
-        }
+    // Clock bars are scaled to the fastest clock seen so far, so they don't all sit at full height.
+    val peak = remember { mutableFloatStateOf(5000f) }
+    val peakClock = maxOf(peak.floatValue, cores.maxOfOrNull { it.clock ?: 0.0 }?.toFloat() ?: 0f)
+    SideEffect { peak.floatValue = peakClock }
+    val values: List<Pair<Float, String>?> = cores.map { c ->
+        if (showClock) c.clock?.let { (it / peakClock).toFloat() to it.toInt().toString() }
+        else c.temp?.let { (it / 100).toFloat() to deg(it) }
     }
-    val shown = values.map { (v, _) -> animateFloatAsState(v.coerceIn(0f, 1f), springy, label = "core").value }
+    val mode = when {
+        showClock -> "CORE MHZ"
+        cores.any { it.tempSource == "ccd" } -> "TEMP PER CCD"
+        cores.any { it.tempSource == "cpu" } -> "CPU TEMP"
+        else -> "CORE TEMP"
+    }
+    val shown = values.map { v -> animateFloatAsState((v?.first ?: 0f).coerceIn(0f, 1f), springy, label = "core").value }
     Box(Modifier.fillMaxSize()) {
-        BoxWithConstraints(Modifier.fillMaxSize().padding(graphicInsets(size, chrome, sideways = size.h == 1 || size == TileSize.Wide))) {
-            if (cores.isEmpty()) {
-                Text("NO CORE DATA", color = Myty.Dim, fontSize = labelSize(size), modifier = Modifier.align(Alignment.Center))
+        // Only the tall, narrow small tile dodges the buttons above and below; the rest move in from the sides.
+        BoxWithConstraints(Modifier.fillMaxSize().padding(graphicInsets(size, chrome, sideways = size != TileSize.Small))) {
+            if (values.none { it != null }) {
+                // Nothing to draw: say why rather than showing empty bars.
+                val why = when {
+                    cores.isEmpty() -> "NO CORE DATA\nUPDATE THE PC APP"
+                    showClock -> "NO CLOCK DATA"
+                    else -> "NO TEMPERATURE DATA"
+                }
+                Text(why, color = Myty.Dim, fontSize = labelSize(size), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center))
                 return@BoxWithConstraints
             }
-            // Two rows only on a squarish large tile (portrait); a wide one fits a single row of tall pills.
-            val rows = if (size == TileSize.Large && cores.size > 6 && maxHeight > maxWidth * 0.6f) 2 else 1
+            // The large tile shows two rows (e.g. 6 + 6 cores); the others one row.
+            val rows = if (size == TileSize.Large && cores.size > 6) 2 else 1
             val perRow = (cores.size + rows - 1) / rows
             val rowGap = 10.dp
             Canvas(Modifier.fillMaxSize()) {
@@ -432,6 +449,7 @@ private fun CoresTile(size: TileSize, g: Gauge, cores: List<com.myty.monitor.dat
                 val showText = size.w == 2 && barW >= 18.dp.toPx()
                 val fontPx = minOf(barW * 0.3f, 12.dp.toPx())
                 for ((i, f) in shown.withIndex()) {
+                    val v = values[i] ?: continue // a core with no reading gets no bar
                     val r = i / perRow
                     val col = i % perRow
                     val x = col * (barW + gapPx)
@@ -439,13 +457,13 @@ private fun CoresTile(size: TileSize, g: Gauge, cores: List<com.myty.monitor.dat
                     val h = maxOf(barW, rowH * f)
                     drawRoundRect(accent, Offset(x, bottom - h), Size(barW, h), CornerRadius(barW / 2))
                     if (showText) {
-                        val text = measurer.measure(values[i].second, TextStyle(fontFamily = Myty.Font, fontSize = fontPx.toSp(), color = on))
+                        val text = measurer.measure(v.second, TextStyle(fontFamily = Myty.Font, fontSize = fontPx.toSp(), color = on))
                         drawText(text, topLeft = Offset(x + (barW - text.size.width) / 2, bottom - barW / 2 - text.size.height / 2))
                     }
                 }
             }
         }
-        BlockLabels(size, g, chrome)
+        BlockLabels(size, g.copy(load = mode), chrome)
     }
 }
 

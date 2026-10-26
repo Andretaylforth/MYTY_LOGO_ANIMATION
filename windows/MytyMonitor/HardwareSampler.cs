@@ -136,10 +136,35 @@ public sealed class HardwareSampler : IDisposable
             target[key] = v;
             if (!cores.Contains(key)) cores.Add(key);
         }
-        return cores.Select(k => new CoreStats(k,
+        var result = cores.Select(k => new CoreStats(k,
             temp.TryGetValue(k, out var t) ? Math.Round(t, 1) : null,
             clock.TryGetValue(k, out var c) ? Math.Round(c) : null,
             load.TryGetValue(k, out var l) ? Math.Round(l, 1) : null)).ToList();
+        return result.Any(c => c.Temp != null) ? result : WithChipletTemps(cpu, result);
+    }
+
+    private static readonly Regex CcdName = new(@"^CCD ?(\d+) \(Tdie\)$", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Ryzens report temperature per CCD (a chiplet of 6 or 8 cores), not per core. Give each core its
+    /// CCD's temperature: cores are numbered in CCD order, so they split evenly across the CCDs.
+    /// With one CCD (or no CCD sensors) every core gets the whole-chip temperature.
+    /// </summary>
+    private static List<CoreStats> WithChipletTemps(IHardware cpu, List<CoreStats> cores)
+    {
+        if (cores.Count == 0) return cores;
+        var ccds = cpu.Sensors
+            .Where(s => s.SensorType == SensorType.Temperature && s.Value.HasValue && CcdName.IsMatch(s.Name))
+            .OrderBy(s => int.Parse(CcdName.Match(s.Name).Groups[1].Value))
+            .Select(s => (double)s.Value!.Value)
+            .ToList();
+        if (ccds.Count > 0)
+        {
+            var perCcd = (int)Math.Ceiling(cores.Count / (double)ccds.Count);
+            return cores.Select((c, i) => c with { Temp = Math.Round(ccds[Math.Min(i / perCcd, ccds.Count - 1)], 1), TempSource = "ccd" }).ToList();
+        }
+        var chip = Find(cpu, SensorType.Temperature, "Core (Tctl/Tdie)", "Core (Tdie)", "Core (Tctl)", "CPU Package", "Package");
+        return chip == null ? cores : cores.Select(c => c with { Temp = Math.Round(chip.Value, 1), TempSource = "cpu" }).ToList();
     }
 
     private static double? ReadCpuFan(List<IHardware> all)

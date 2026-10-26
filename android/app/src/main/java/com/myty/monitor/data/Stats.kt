@@ -15,8 +15,11 @@ data class CpuStats(
     val cores: List<CoreStats> = emptyList(),
 )
 
-/** One CPU core; temp is null where the CPU doesn't report it per core. */
-data class CoreStats(val name: String, val temp: Double?, val clock: Double?, val load: Double?)
+/**
+ * One CPU core. [tempSource] says where [temp] comes from: "core" (its own sensor, e.g. Intel), "ccd" (the
+ * temperature of its chiplet; Ryzens don't measure each core) or "cpu" (one reading for the whole chip).
+ */
+data class CoreStats(val name: String, val temp: Double?, val clock: Double?, val load: Double?, val tempSource: String = "core")
 
 data class GpuStats(
     val name: String,
@@ -62,7 +65,8 @@ data class Stats(
                     fan = c.num("fan"),
                     power = c.num("power"),
                     cores = c.optJSONArray("cores").objects().map {
-                        CoreStats(it.optString("name"), it.num("temp"), it.num("clock"), it.num("load"))
+                        CoreStats(it.optString("name"), it.num("temp"), it.num("clock"), it.num("load"),
+                            it.optString("tempSource", "core").ifEmpty { "core" })
                     },
                 ),
                 gpu = g?.let {

@@ -66,7 +66,7 @@ The phone shows a grid of live tiles, inspired by Windows Phone. There's one lay
 - **Tiles**: CPU, GPU, RAM, Network, Storage and Processes. CPU and GPU tiles show temperature; the RAM tile shows memory use.
 - **Sizes**: tiny (1 × ½), small (1 × 1), wide (2 × 1) and large (2 × 2).
 - **Styles** for CPU, GPU and RAM: 1 ring, 2 fill, 3 orbiting ball, 4 dot grid. CPU and GPU also have 5 block (the reading in a coloured block beside a white one). CPU has 6, a bar for each core.
-- **Tap a tile** to switch to its other reading: CPU and GPU switch between temperature and load, RAM between percent and GB, Processes between sorting by CPU and RAM. The per-core bars switch from temperature to load. Most Ryzen CPUs don't report a temperature per core; there the bars show each core's clock until tapped.
+- **Tap a tile** to switch to its other reading: CPU and GPU switch between temperature and load, RAM between percent and GB, Processes between sorting by CPU and RAM. The per-core bars switch between temperature and MHz. Ryzen CPUs only measure temperature per CCD (chiplet of 6–8 cores), not per core, so there each core shows its CCD's temperature and the tile says "TEMP PER CCD" (for example a 12-core Ryzen 9 shows 6 cores at CCD1's temperature and 6 at CCD2's). Intel CPUs report every core.
 
 ![Tile styles](docs/tile-styles.png)
 

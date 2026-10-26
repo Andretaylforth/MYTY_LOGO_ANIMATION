@@ -12,8 +12,11 @@ public sealed record CpuStats(
     double? Power,    // W
     IReadOnlyList<CoreStats> Cores);
 
-/// <summary>One CPU core. Temperature is null where the CPU doesn't report it per core (most Ryzens).</summary>
-public sealed record CoreStats(string Name, double? Temp, double? Clock, double? Load); // °C, MHz, %
+/// <summary>
+/// One CPU core. Ryzens don't report a temperature per core, only per CCD (chiplet); there [Temp] is the
+/// temperature of the core's CCD and [TempSource] is "ccd" (or "cpu" for a single whole-chip reading).
+/// </summary>
+public sealed record CoreStats(string Name, double? Temp, double? Clock, double? Load, string? TempSource = "core"); // °C, MHz, %
 
 public sealed record GpuStats(
     string Name,
