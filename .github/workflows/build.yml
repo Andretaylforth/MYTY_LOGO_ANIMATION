@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Test per-core reading
+        run: dotnet run --project windows/CoreReaderTests
       - name: Publish MytyMonitor.exe
         run: dotnet publish windows/MytyMonitor/MytyMonitor.csproj -c Release -o out
       - uses: actions/upload-artifact@v4

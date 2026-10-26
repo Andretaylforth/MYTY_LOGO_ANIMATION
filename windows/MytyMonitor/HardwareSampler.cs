@@ -105,43 +105,27 @@ public sealed class HardwareSampler : IDisposable
             ReadCores(cpu));
     }
 
-    // "CPU Core #3", "Core #3", "P-Core #1", "E-Core #2", "Core #1 (CCD1)"...
-    private static readonly Regex CoreName = new(@"\b([PE]-)?Core #(\d+)\b", RegexOptions.IgnoreCase);
-
-    /// <summary>Per-core temperature, clock and load, in the order the CPU lists its cores.</summary>
+    /// <summary>Per-core temperature, clock and load: one entry per physical core, never per thread.</summary>
     private static List<CoreStats> ReadCores(IHardware cpu)
     {
-        var cores = new List<string>();
-        var temp = new Dictionary<string, double>();
-        var clock = new Dictionary<string, double>();
-        var load = new Dictionary<string, double>();
-        foreach (var sensor in cpu.Sensors)
-        {
-            if (sensor.Value is not { } v) continue;
-            var name = sensor.Name;
-            if (name.Contains("Thread", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("Distance", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("Effective", StringComparison.OrdinalIgnoreCase)) continue;
-            var m = CoreName.Match(name);
-            if (!m.Success) continue;
-            var key = m.Groups[1].Value.ToUpperInvariant().TrimEnd('-') + m.Groups[2].Value; // "3", "P1", "E2"
-            var target = sensor.SensorType switch
-            {
-                SensorType.Temperature => temp,
-                SensorType.Clock => clock,
-                SensorType.Load => load,
-                _ => null,
-            };
-            if (target == null || target.ContainsKey(key)) continue;
-            target[key] = v;
-            if (!cores.Contains(key)) cores.Add(key);
-        }
-        var result = cores.Select(k => new CoreStats(k,
-            temp.TryGetValue(k, out var t) ? Math.Round(t, 1) : null,
-            clock.TryGetValue(k, out var c) ? Math.Round(c) : null,
-            load.TryGetValue(k, out var l) ? Math.Round(l, 1) : null)).ToList();
-        return result.Any(c => c.Temp != null) ? result : WithChipletTemps(cpu, result);
+        var cores = CoreReader.Read(cpu.Sensors.Select(x => (x.Name, x.SensorType, (double?)x.Value)), PhysicalCoreCount.Value);
+        return cores.Any(c => c.Temp != null) ? cores : WithChipletTemps(cpu, cores);
     }
+
+    /// <summary>Physical cores across all sockets, from Windows; null if it can't be read.</summary>
+    private static readonly Lazy<int?> PhysicalCoreCount = new(() =>
+    {
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher("SELECT NumberOfCores FROM Win32_Processor");
+            var total = searcher.Get().Cast<System.Management.ManagementObject>().Sum(o => Convert.ToInt32(o["NumberOfCores"]));
+            return total > 0 ? total : null;
+        }
+        catch
+        {
+            return null;
+        }
+    });
 
     private static readonly Regex CcdName = new(@"^CCD ?(\d+) \(Tdie\)$", RegexOptions.IgnoreCase);
 
