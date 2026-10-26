@@ -3,6 +3,12 @@ package com.myty.monitor.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.drawText
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -76,24 +82,28 @@ private data class Gauge(
     val fraction: Float,
 )
 
-private fun gaugeFor(kind: TileKind, s: Stats?): Gauge = when (kind) {
+/** The reading a CPU / GPU / RAM tile shows; [alt] (toggled by a tap) swaps temperature for load. */
+private fun gaugeFor(kind: TileKind, s: Stats?, alt: Boolean): Gauge = when (kind) {
     TileKind.Gpu -> {
         val g = s?.gpu
-        Gauge("GPU", g?.clock?.let { "${it.toInt()}MHZ" }, g?.load?.let { "${it.toInt()}% LOAD" },
-            g?.name?.uppercase(), deg(g?.temp), frac(g?.temp))
+        val clock = g?.clock?.let { "${it.toInt()}MHZ" }
+        if (!alt) Gauge("GPU", clock, g?.load?.let { "${it.toInt()}% LOAD" }, g?.name?.uppercase(), deg(g?.temp), frac(g?.temp))
+        else Gauge("GPU", clock, g?.temp?.let { deg(it) + " TEMP" }, g?.name?.uppercase(), pct(g?.load), frac(g?.load))
     }
     TileKind.Ram -> {
         val r = s?.ram
-        Gauge("RAM", null, r?.let { "${gb(it.used)}/${gb(it.total)}GB" }, r?.let { "MEMORY IN USE" },
-            r?.let { "${it.load.toInt()}%" } ?: "--%", frac(r?.load))
+        if (!alt) Gauge("RAM", null, r?.let { "${gb(it.used)}/${gb(it.total)}GB" }, r?.let { "MEMORY IN USE" }, pct(r?.load), frac(r?.load))
+        else Gauge("RAM", null, pct(r?.load) + " USED", r?.let { "OF ${gb(it.total)}GB" }, r?.let { "${gb(it.used)}G" } ?: "--", frac(r?.load))
     }
     else -> {
         val c = s?.cpu
-        Gauge("CPU", c?.clock?.let { "${it.toInt()}MHZ" }, c?.load?.let { "${it.toInt()}% LOAD" },
-            c?.name?.uppercase(), deg(c?.temp), frac(c?.temp))
+        val clock = c?.clock?.let { "${it.toInt()}MHZ" }
+        if (!alt) Gauge("CPU", clock, c?.load?.let { "${it.toInt()}% LOAD" }, c?.name?.uppercase(), deg(c?.temp), frac(c?.temp))
+        else Gauge("CPU", clock, c?.temp?.let { deg(it) + " TEMP" }, c?.name?.uppercase(), pct(c?.load), frac(c?.load))
     }
 }
 
+private fun pct(v: Double?) = v?.let { "${Math.round(it)}%" } ?: "--%"
 private fun deg(v: Double?) = v?.let { "${Math.round(it)}°" } ?: "--°"
 private fun frac(v: Double?) = ((v ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
 private fun gb(v: Double) = if (v >= 100) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
@@ -106,17 +116,19 @@ fun TileContent(tile: Tile, data: TileData, chrome: Boolean, modifier: Modifier 
     Box(modifier.clip(RoundedCornerShape(Myty.Radius)).background(Myty.Tile)) {
         when (tile.kind) {
             TileKind.Cpu, TileKind.Gpu, TileKind.Ram -> {
-                val g = gaugeFor(tile.kind, data.stats)
+                val g = gaugeFor(tile.kind, data.stats, tile.alt)
                 when (tile.style) {
                     2 -> FillTile(tile.size, g, chrome)
                     3 -> OrbitTile(tile.size, g, chrome)
                     4 -> DotsTile(tile.size, g, chrome)
+                    5 -> BlockTile(tile.size, g, chrome)
+                    6 -> CoresTile(tile.size, g, data.stats?.cpu?.cores.orEmpty(), tile.alt, chrome)
                     else -> RingTile(tile.size, g, chrome)
                 }
             }
             TileKind.Network -> NetworkTile(tile.size, data, chrome)
             TileKind.Storage -> StorageTile(tile.size, data.stats, chrome)
-            TileKind.Processes -> ProcessTile(tile.size, data.stats, chrome)
+            TileKind.Processes -> ProcessTile(tile.size, data.stats, chrome, byRam = tile.alt)
         }
     }
 }
@@ -317,6 +329,126 @@ private fun DotsTile(size: TileSize, g: Gauge, chrome: Boolean) {
     }
 }
 
+// ---- Style 5: block ------------------------------------------------------------------------------
+
+/**
+ * Where a style 5/6 tile draws its graphic: below the label row normally; while the corner buttons show,
+ * clear of them — above and below on tall tiles, beside them on short ones.
+ */
+@Composable
+private fun graphicInsets(size: TileSize, chrome: Boolean, sideways: Boolean): PaddingValues {
+    val inner = if (size == TileSize.Tiny) 6.dp else 8.dp
+    val label = pad(size) + 18.dp
+    val button = buttonPad(size) + buttonSize(size) + 6.dp
+    val top by animateDpAsState(if (chrome) label else if (sideways) inner else button, label = "insetTop")
+    val bottom by animateDpAsState(if (chrome || sideways) inner else button, label = "insetBottom")
+    val side by animateDpAsState(if (!chrome && sideways) button else inner, label = "insetSide")
+    return PaddingValues(start = side, end = side, top = top, bottom = bottom)
+}
+
+/** A highlight-coloured block holding the reading, its width set by the value, beside a white block. */
+@Composable
+private fun BlockTile(size: TileSize, g: Gauge, chrome: Boolean) {
+    val accent = LocalAccent.current
+    val f by animateFloatAsState(g.fraction, springy, label = "block")
+    val measurer = rememberTextMeasurer()
+    Box(Modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(graphicInsets(size, chrome, sideways = size.h == 1 || size == TileSize.Wide))) {
+            val gap = if (size == TileSize.Tiny) 5.dp else 8.dp
+            val corner = if (size == TileSize.Tiny) 8.dp else 12.dp
+            val fs = minOf(maxWidth.value / size.w * 0.2f, maxHeight.value * 0.42f, 60f)
+            val density = LocalDensity.current
+            val textW = with(density) { measurer.measure(g.value, TextStyle(fontFamily = Myty.Font, fontSize = fs.sp)).size.width.toDp() }
+            // The block is as wide as the value says, but never narrower than its text.
+            var blueW = maxOf((maxWidth - gap) * f, textW + 16.dp).coerceAtMost(maxWidth)
+            var whiteW = maxWidth - gap - blueW
+            if (whiteW < 12.dp) { blueW = maxWidth; whiteW = 0.dp }
+            val textColor = if (accent.luminance() < 0.03f) Color.White else Color.Black
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.width(blueW).fillMaxHeight().clip(RoundedCornerShape(corner)).background(accent), contentAlignment = Alignment.Center) {
+                    Value(g.value, fs, color = textColor)
+                }
+                if (whiteW > 0.dp) {
+                    Spacer(Modifier.width(gap))
+                    Box(Modifier.width(whiteW).fillMaxHeight().clip(RoundedCornerShape(corner)).background(Myty.White))
+                }
+            }
+        }
+        BlockLabels(size, g, chrome)
+    }
+}
+
+/** Label top-left (with the clock on large tiles) and load top-right (on two-column tiles). */
+@Composable
+private fun BoxScope.BlockLabels(size: TileSize, g: Gauge, chrome: Boolean) {
+    AnimatedVisibility(chrome, Modifier.matchParentSize(), enter = fadeIn(), exit = fadeOut()) {
+        Box(Modifier.fillMaxSize().padding(pad(size))) {
+            val fs = labelSize(size)
+            val top = if (size == TileSize.Large && g.clock != null) "${g.label}  ${g.clock}" else g.label
+            Text(top, fontSize = fs, maxLines = 1, modifier = Modifier.align(Alignment.TopStart))
+            if (size.w == 2 && g.load != null) Text(g.load, fontSize = fs, maxLines = 1, modifier = Modifier.align(Alignment.TopEnd))
+        }
+    }
+}
+
+// ---- Style 6: per-core bars ----------------------------------------------------------------------
+
+/**
+ * One rounded bar per CPU core, its height set by that core's temperature (or load once tapped).
+ * Where the CPU doesn't report per-core temperatures (most Ryzens), the bars show each core's clock.
+ */
+@Composable
+private fun CoresTile(size: TileSize, g: Gauge, cores: List<com.myty.monitor.data.CoreStats>, alt: Boolean, chrome: Boolean) {
+    val accent = LocalAccent.current
+    val on = onColor(accent)
+    val measurer = rememberTextMeasurer()
+    val hasTemps = cores.any { it.temp != null }
+    val peakClock = cores.maxOfOrNull { it.clock ?: 0.0 }?.coerceAtLeast(1.0) ?: 1.0
+    val values: List<Pair<Float, String>> = cores.map { c ->
+        when {
+            alt -> ((c.load ?: 0.0) / 100).toFloat() to pct(c.load)
+            hasTemps -> ((c.temp ?: 0.0) / 100).toFloat() to deg(c.temp)
+            else -> ((c.clock ?: 0.0) / peakClock).toFloat() to (c.clock?.let { String.format(Locale.US, "%.1f", it / 1000) } ?: "--")
+        }
+    }
+    val shown = values.map { (v, _) -> animateFloatAsState(v.coerceIn(0f, 1f), springy, label = "core").value }
+    Box(Modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(graphicInsets(size, chrome, sideways = size.h == 1 || size == TileSize.Wide))) {
+            if (cores.isEmpty()) {
+                Text("NO CORE DATA", color = Myty.Dim, fontSize = labelSize(size), modifier = Modifier.align(Alignment.Center))
+                return@BoxWithConstraints
+            }
+            // Two rows only on a squarish large tile (portrait); a wide one fits a single row of tall pills.
+            val rows = if (size == TileSize.Large && cores.size > 6 && maxHeight > maxWidth * 0.6f) 2 else 1
+            val perRow = (cores.size + rows - 1) / rows
+            val rowGap = 10.dp
+            Canvas(Modifier.fillMaxSize()) {
+                val gapRatio = 0.18f
+                val rowH = (this.size.height - rowGap.toPx() * (rows - 1)) / rows
+                // Bars are pills: never wider than about 40% of their row, so they can show a range of heights.
+                val barW = minOf(this.size.width / (perRow + gapRatio * (perRow - 1)), rowH * 0.42f)
+                // Spread whatever width is left evenly between the bars.
+                val gapPx = if (perRow > 1) (this.size.width - barW * perRow) / (perRow - 1) else 0f
+                val showText = size.w == 2 && barW >= 18.dp.toPx()
+                val fontPx = minOf(barW * 0.3f, 12.dp.toPx())
+                for ((i, f) in shown.withIndex()) {
+                    val r = i / perRow
+                    val col = i % perRow
+                    val x = col * (barW + gapPx)
+                    val bottom = r * (rowH + rowGap.toPx()) + rowH
+                    val h = maxOf(barW, rowH * f)
+                    drawRoundRect(accent, Offset(x, bottom - h), Size(barW, h), CornerRadius(barW / 2))
+                    if (showText) {
+                        val text = measurer.measure(values[i].second, TextStyle(fontFamily = Myty.Font, fontSize = fontPx.toSp(), color = on))
+                        drawText(text, topLeft = Offset(x + (barW - text.size.width) / 2, bottom - barW / 2 - text.size.height / 2))
+                    }
+                }
+            }
+        }
+        BlockLabels(size, g, chrome)
+    }
+}
+
 // ---- Network -------------------------------------------------------------------------------------
 
 @Composable
@@ -331,14 +463,27 @@ private fun NetworkTile(size: TileSize, data: TileData, chrome: Boolean) {
         }
         val big = when (size) {
             TileSize.Tiny -> minOf(maxWidth.value * 0.13f, 16f)
+            TileSize.Wide -> minOf(maxWidth.value * 0.12f, maxHeight.value * 0.2f, 40f)
             else -> minOf(maxWidth.value * 0.12f, maxHeight.value * 0.11f, 40f)
         }
+        // On the tiny tile the reading sits bottom-left; move it past the resize button while that shows.
+        val dodge by animateDpAsState(if (!chrome && size == TileSize.Tiny) buttonSize(size) + 4.dp else 0.dp, label = "netDodge")
         Column(
-            Modifier.padding(pad(size)).align(if (size == TileSize.Tiny) Alignment.BottomStart else Alignment.CenterStart)
-                .offset(y = if (size == TileSize.Tiny) 0.dp else -maxHeight * 0.08f),
+            Modifier.padding(pad(size)).padding(start = dodge)
+                .align(if (size == TileSize.Tiny) Alignment.BottomStart else Alignment.CenterStart)
+                .offset(y = when (size) { TileSize.Tiny -> 0.dp; TileSize.Wide -> 4.dp; else -> -maxHeight * 0.08f }),
         ) {
-            if (size != TileSize.Tiny) Text("↑ " + rate(n?.up), fontSize = big.sp, maxLines = 1)
-            Text("↓ " + rate(n?.down), fontSize = big.sp, maxLines = 1, color = if (size == TileSize.Tiny) Myty.White else accent)
+            if (size == TileSize.Wide) {
+                // Side by side on the short wide tile so they stay clear of the graph.
+                Row {
+                    Text("↑ " + rate(n?.up), fontSize = big.sp, maxLines = 1)
+                    Spacer(Modifier.width(16.dp))
+                    Text("↓ " + rate(n?.down), fontSize = big.sp, maxLines = 1, color = accent)
+                }
+            } else {
+                if (size != TileSize.Tiny) Text("↑ " + rate(n?.up), fontSize = big.sp, maxLines = 1)
+                Text("↓ " + rate(n?.down), fontSize = big.sp, maxLines = 1, color = if (size == TileSize.Tiny) Myty.White else accent)
+            }
         }
         AnimatedVisibility(chrome, Modifier.padding(pad(size)).align(Alignment.TopStart), enter = fadeIn(), exit = fadeOut()) {
             Text(if (size == TileSize.Tiny) "NET" else "NETWORK", fontSize = labelSize(size))
@@ -412,13 +557,13 @@ private fun tb(bytes: Long): String {
 // ---- Processes -----------------------------------------------------------------------------------
 
 @Composable
-private fun ProcessTile(size: TileSize, s: Stats?, chrome: Boolean) {
+private fun ProcessTile(size: TileSize, s: Stats?, chrome: Boolean, byRam: Boolean) {
     val accent = LocalAccent.current
     BoxWithConstraints(Modifier.fillMaxSize().padding(pad(size))) {
         val head = if (chrome) 22.dp else 0.dp
         val rowH = if (size == TileSize.Tiny) 16.dp else 22.dp
         val fit = ((maxHeight - head) / rowH).toInt().coerceAtLeast(1)
-        val procs = s?.procs.orEmpty().sortedByDescending { it.cpu }.take(fit)
+        val procs = s?.procs.orEmpty().sortedByDescending { if (byRam) it.ram.toDouble() else it.cpu }.take(fit)
         val top = procs.maxOfOrNull { it.cpu }?.coerceAtLeast(1.0) ?: 1.0
         Column(Modifier.fillMaxSize().padding(top = head)) {
             procs.forEach { p ->
@@ -443,7 +588,7 @@ private fun ProcessTile(size: TileSize, s: Stats?, chrome: Boolean) {
             }
         }
         AnimatedVisibility(chrome, Modifier.align(Alignment.TopStart), enter = fadeIn(), exit = fadeOut()) {
-            Text(if (size.w == 2) "TOP PROCESSES · CPU" else "PROCESSES", fontSize = labelSize(size))
+            Text(if (size.w == 2) "TOP PROCESSES · " + (if (byRam) "RAM" else "CPU") else "PROCESSES", fontSize = labelSize(size))
         }
     }
 }

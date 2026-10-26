@@ -24,10 +24,15 @@ class TileLayoutTest {
         for (a in tiles) for (b in tiles) if (a.id != b.id) assertTrue("$a overlaps $b", !a.overlaps(b))
     }
 
+    private fun assertFull(tiles: List<Tile>) {
+        assertValid(tiles)
+        assertTrue("not full: $tiles", TileLayout.isFull(tiles, grid))
+    }
+
     @Test
     fun bigTileDraggedLeft_leftTilesJumpRight() {
         val out = TileLayout.move(home, grid, big.id, 0, 0)!!
-        assertValid(out)
+        assertFull(out)
         assertEquals(big.at(0, 0), out.byId(4))
         assertEquals(topLeft.at(2, 0), out.byId(1))
         assertEquals(topMid.at(3, 0), out.byId(2))
@@ -35,29 +40,28 @@ class TileLayoutTest {
     }
 
     @Test
-    fun bottomTileDraggedRight_bigTileShrinksToTopHalf() {
+    fun bottomTileDraggedRight_bigShrinks_leftTilesGrowIntoTheSpace() {
         val out = TileLayout.move(home, grid, bottomLeft.id, 2, 2)!!
-        assertValid(out)
+        assertFull(out)
         assertEquals(bottomLeft.at(2, 2), out.byId(3))
         assertEquals(big.at(2, 0, TileSize.Wide), out.byId(4))
-        // The bottom-left space is left empty.
-        assertEquals(topLeft, out.byId(1))
-        assertEquals(topMid, out.byId(2))
+        // The two small tiles grow to fill the left half instead of leaving a hole.
+        assertEquals(listOf(TileSize.Wide, TileSize.Wide), listOf(out.byId(1).size, out.byId(2).size))
     }
 
     @Test
     fun topLeftDraggedRight_bigShrinks_draggedGrows_neighbourFillsVoid() {
         val out = TileLayout.move(home, grid, topLeft.id, 2, 2)!!
-        assertValid(out)
+        assertFull(out)
         assertEquals(big.at(2, 0, TileSize.Wide), out.byId(4))
         assertEquals(topLeft.at(2, 2, TileSize.Wide), out.byId(1))
-        assertEquals(topMid.at(0, 0), out.byId(2))
+        assertEquals(0 to 0, out.byId(2).let { it.col to it.row })
     }
 
     @Test
     fun droppedOnTopHalf_bigShrinksToBottomHalf() {
         val out = TileLayout.move(home, grid, topLeft.id, 3, 0)!!
-        assertValid(out)
+        assertFull(out)
         assertEquals(TileSize.Wide, out.byId(4).size)
         assertEquals(2, out.byId(4).row)
         assertEquals(topLeft.at(2, 0, TileSize.Wide), out.byId(1))
@@ -66,43 +70,52 @@ class TileLayoutTest {
     @Test
     fun smallTilesSwap() {
         val out = TileLayout.move(home, grid, topLeft.id, 1, 0)!!
-        assertValid(out)
+        assertFull(out)
         assertEquals(topLeft.at(1, 0), out.byId(1))
         assertEquals(topMid.at(0, 0), out.byId(2))
     }
 
     @Test
-    fun resizeCyclesSmallestToBiggestAndWraps() {
-        val single = listOf(Tile(1, TileKind.Gpu, TileSize.Tiny, 0, 0))
-        val sizes = generateSequence(single) { TileLayout.resize(it, grid, 1) }.take(5).map { it[0].size }.toList()
-        assertEquals(listOf(TileSize.Tiny, TileSize.Small, TileSize.Wide, TileSize.Large, TileSize.Tiny), sizes)
+    fun resizeCyclesSmallestToBiggestAndKeepsTheScreenFull() {
+        var t = home
+        val sizes = mutableListOf(t.byId(1).size)
+        repeat(4) { t = TileLayout.resize(t, grid, 1); assertFull(t); sizes += t.byId(1).size }
+        // Sizes that can't leave a full screen are skipped (here tiny: four tiles can't tile it).
+        assertEquals(listOf(TileSize.Small, TileSize.Wide, TileSize.Large, TileSize.Small, TileSize.Wide), sizes)
+    }
+
+    @Test
+    fun shrinkingALoneTilePullsOthersIn() {
+        // The large tile is alone in its half; shrinking it brings tiles over from the other half.
+        val out = TileLayout.resize(home, grid, big.id) // Large -> Tiny if possible, else the next size that works
+        assertFull(out)
+        assertTrue(out.byId(4).size != TileSize.Large)
     }
 
     @Test
     fun growingPushesNeighboursSmaller() {
         val out = TileLayout.resize(home, grid, topLeft.id) // Small -> Wide, over topMid
-        assertValid(out)
+        assertFull(out)
         assertEquals(TileSize.Wide, out.byId(1).size)
         assertEquals(4, out.size)
     }
 
     @Test
-    fun closeLeavesGap_addFillsIt() {
-        val closed = TileLayout.remove(home, topMid.id)
-        assertEquals(3, closed.size)
-        val added = TileLayout.add(closed, grid, TileKind.Gpu, side = { it.right <= 2 })
-        assertValid(added)
-        val new = added.first { it.kind == TileKind.Gpu }
-        assertEquals(1 to 0, new.col to new.row)
+    fun closingATileFillsItsSpace() {
+        for (t in home) {
+            val out = TileLayout.remove(home, grid, t.id)
+            assertEquals(3, out.size)
+            assertFull(out)
+        }
     }
 
     @Test
     fun addWhenFull_makesRoomOnPreferredSide() {
         repeat(20) { seed ->
             val added = TileLayout.add(home, grid, TileKind.Network, side = { it.col >= 2 }, random = Random(seed))
-            assertValid(added)
+            assertFull(added)
             assertEquals(5, added.size)
-            val new = added.first { it.kind == TileKind.Network }
+            val new = added.first { it.id == 5L }
             assertTrue(new.col >= 2)
         }
     }
@@ -110,44 +123,50 @@ class TileLayoutTest {
     @Test
     fun cycleStyleWraps() {
         var t = listOf(topLeft)
-        val styles = (1..5).map { t[0].style.also { _ -> t = TileLayout.cycleStyle(t, 1) } }
-        assertEquals(listOf(1, 2, 3, 4, 1), styles)
+        val styles = (1..7).map { t[0].style.also { _ -> t = TileLayout.cycleStyle(t, 1) } }
+        assertEquals(listOf(1, 2, 3, 4, 5, 6, 1), styles) // CPU has six styles
     }
 
     @Test
-    fun everyDragTargetGivesAValidLayout() {
+    fun everyDragTargetGivesAFullLayout() {
         for (id in 1L..4L) for (c in -1..4) for (r in -1..4) {
-            TileLayout.move(home, grid, id, c, r)?.let(::assertValid)
+            TileLayout.move(home, grid, id, c, r)?.let(::assertFull)
         }
         assertNotNull(TileLayout.move(home, grid, 4, 0, 0))
     }
 
     @Test
-    fun noTileStraddlesTheMiddle() {
-        assertTrue(!grid.contains(Tile(9, TileKind.Cpu, TileSize.Wide, 1, 0)))
-        // Growing a small tile in column 1 to wide keeps it in the left half.
-        val single = listOf(Tile(1, TileKind.Cpu, TileSize.Small, 1, 0))
-        val grown = TileLayout.resize(single, grid, 1)[0]
-        assertEquals(TileSize.Wide to 0, grown.size to grown.col)
-        // Dragging a wide tile to column 1 snaps it to a half.
-        for (c in 0..3) TileLayout.move(home, grid, bottomLeft.id, c, 2)?.let(::assertValid)
+    fun randomEditsAlwaysLeaveTheScreenFull() {
+        val rnd = Random(42)
+        var tiles = home
+        repeat(3000) {
+            val t = tiles.random(rnd)
+            val op = rnd.nextInt(4)
+            val before = tiles
+            tiles = when (op) {
+                0 -> TileLayout.move(tiles, grid, t.id, rnd.nextInt(4), rnd.nextInt(4)) ?: tiles
+                1 -> TileLayout.resize(tiles, grid, t.id)
+                2 -> if (tiles.size > 2) TileLayout.remove(tiles, grid, t.id) else tiles
+                else -> if (tiles.size < 9) TileLayout.add(tiles, grid, TileKind.entries.random(rnd), { true }, rnd) else tiles
+            }
+            assertTrue("op $op on ${t.id} from $before", TileLayout.isFull(tiles, grid))
+        }
     }
 
     @Test
-    fun gapsCoverExactlyTheEmptySpace() {
-        assertEquals(emptyList<Tile>(), TileLayout.gaps(home, grid))
-        val closed = TileLayout.remove(home, big.id)
-        assertEquals(listOf(TileSize.Large to (2 to 0)), TileLayout.gaps(closed, grid).map { it.size to (it.col to it.row) })
-        val two = TileLayout.remove(home, topMid.id)
-        val gaps = TileLayout.gaps(two, grid)
-        assertEquals(listOf(Tile(gaps[0].id, TileKind.Cpu, TileSize.Small, 1, 0)), gaps)
-        assertTrue(gaps.all { it.id < 0 })
-        // Filling a gap puts a tile of that size exactly there.
-        val filled = TileLayout.fill(two, grid, TileKind.Storage, gaps[0])
-        assertEquals(TileSize.Small to (1 to 0), filled.first { it.kind == TileKind.Storage }.let { it.size to (it.col to it.row) })
-        assertEquals(emptyList<Tile>(), TileLayout.gaps(filled, grid))
-        // An empty screen is two large gaps, one per half.
-        assertEquals(2, TileLayout.gaps(emptyList(), grid).size)
+    fun noTileStraddlesTheMiddle() {
+        assertTrue(!grid.contains(Tile(9, TileKind.Cpu, TileSize.Wide, 1, 0)))
+        // Growing the small tile in column 1 to wide keeps it in the left half.
+        val grown = TileLayout.resize(home, grid, topMid.id).byId(2)
+        assertEquals(TileSize.Wide to 0, grown.size to grown.col)
+        for (c in 0..3) TileLayout.move(home, grid, bottomLeft.id, c, 2)?.let(::assertFull)
+    }
+
+    @Test
+    fun toggleAltFlipsOnlyThatTile() {
+        val out = TileLayout.toggleAlt(home, big.id)
+        assertTrue(out.byId(4).alt)
+        assertTrue(out.filter { it.id != 4L }.none { it.alt })
     }
 
     @Test

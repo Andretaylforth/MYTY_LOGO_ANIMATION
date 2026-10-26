@@ -61,11 +61,12 @@ There are two ways to connect over a cable:
 
 ## The home screen
 
-The phone shows a grid of live tiles, inspired by Windows Phone. There's one layout: 4 columns × 4 half-rows, split into a left and a right half. Landscape shows the halves side by side; portrait stacks the right half under the left, so every tile keeps its place when you rotate the phone. A wide or large tile always sits within one half.
+The phone shows a grid of live tiles, inspired by Windows Phone. There's one layout: 4 columns × 4 half-rows, split into a left and a right half. Landscape shows the halves side by side; portrait stacks the right half under the left, so every tile keeps its place when you rotate the phone. A wide or large tile always sits within one half. The screen is always full: when you close, shrink, move or add a tile, the others grow, shrink or move to fill the space.
 
 - **Tiles**: CPU, GPU, RAM, Network, Storage and Processes. CPU and GPU tiles show temperature; the RAM tile shows memory use.
 - **Sizes**: tiny (1 × ½), small (1 × 1), wide (2 × 1) and large (2 × 2).
-- **Styles** for CPU, GPU and RAM: 1 ring, 2 fill, 3 orbiting ball, 4 dot grid.
+- **Styles** for CPU, GPU and RAM: 1 ring, 2 fill, 3 orbiting ball, 4 dot grid. CPU and GPU also have 5 block (the reading in a coloured block beside a white one). CPU has 6, a bar for each core.
+- **Tap a tile** to switch to its other reading: CPU and GPU switch between temperature and load, RAM between percent and GB, Processes between sorting by CPU and RAM. The per-core bars switch from temperature to load. Most Ryzen CPUs don't report a temperature per core; there the bars show each core's clock until tapped.
 
 ![Tile styles](docs/tile-styles.png)
 
@@ -75,9 +76,8 @@ The phone shows a grid of live tiles, inspired by Windows Phone. There's one lay
   - bottom-left (arrows): next size, smallest to biggest and back round
   - bottom-right (tick): done
 - **Tap anywhere else** also puts the tile back to normal.
-- **Empty space** shows a `+` tile. Tap it to open the Tiles menu on the other side of the screen; the tile you pick fills that space.
 - **Long-press and drag** to move a tile. Tiles in the way jump into the space it left. If they don't fit there, they shrink to make room (for example, a large tile halves). Tiles next to the gap slide over to fill it. Let go to drop it.
-- **Swipe left or right** to open the menu on the other side of the screen:
+- **Swipe left or right** (landscape) or **down or up** (portrait) to open the menu from that edge:
   - **Tiles** adds a tile. It goes into an empty gap if there is one, otherwise onto the visible half of the screen, shrinking tiles there to fit.
   - **Colours** changes the highlight colour (everything blue). The three `+` slots hold your own colours: tap an empty one to create a colour, tap a filled one to use it, or long-press it to edit it. The first slot starts with the default Myty blue.
   - **Change PC** is on the menu's first page.

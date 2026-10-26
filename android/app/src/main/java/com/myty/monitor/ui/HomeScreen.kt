@@ -10,12 +10,20 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.PointerInputScope
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -64,7 +72,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
-enum class MenuSide { Left, Right }
+/** Where the menu slides in from: left/right in landscape, top/bottom in portrait. */
+enum class MenuSide { Left, Right, Top, Bottom }
 
 private class DragState(val id: Long, val start: List<Tile>, val origin: Offset) {
     var delta by mutableStateOf(Offset.Zero)
@@ -95,12 +104,9 @@ fun HomeScreen(
     var closing by remember { mutableStateOf(setOf<Long>()) }
     var menu by remember { mutableStateOf<MenuSide?>(null) }
     var page by remember { mutableStateOf<MenuPage>(MenuPage.Root) }
-    // The "+" tile the Tiles page was opened from; picking a tile fills exactly that space.
-    var fillGap by remember { mutableStateOf<Tile?>(null) }
     val currentTiles by rememberUpdatedState(tiles)
     // Tiles already on screen at launch just appear; only ones added later animate in.
     val initialIds = remember { tiles.map { it.id }.toSet() }
-    val initialGaps = remember { TileLayout.gaps(tiles, grid).map { it.id }.toSet() }
     val currentOnTiles by rememberUpdatedState(onTiles)
 
     // Nudge everything a couple of dp each minute so a static layout doesn't burn into OLED screens.
@@ -117,21 +123,26 @@ fun HomeScreen(
         if (closing.isEmpty()) return@LaunchedEffect
         delay(220)
         var t = currentTiles
-        closing.forEach { t = TileLayout.remove(t, it) }
+        closing.forEach { t = TileLayout.remove(t, grid, it) }
         closing = emptySet()
         currentOnTiles(t)
     }
 
-    fun openMenu(side: MenuSide, p: MenuPage = MenuPage.Root, gap: Tile? = null) {
+    fun openMenu(side: MenuSide, p: MenuPage = MenuPage.Root) {
         menu = side
         page = p
-        fillGap = gap
         selected = null
     }
 
     fun closeMenu() {
         menu = null
-        fillGap = null
+    }
+
+    // Swipe away from an edge to open the menu from that edge; swipe back towards it to close the menu.
+    fun swiped(forward: Boolean, vertical: Boolean) {
+        val opens = if (vertical) (if (forward) MenuSide.Top else MenuSide.Bottom) else (if (forward) MenuSide.Left else MenuSide.Right)
+        val closes = if (vertical) (if (forward) MenuSide.Bottom else MenuSide.Top) else (if (forward) MenuSide.Right else MenuSide.Left)
+        if (menu == closes) closeMenu() else openMenu(opens)
     }
 
     val data = TileData(state.stats, state.netDown, state.netUp)
@@ -141,19 +152,22 @@ fun HomeScreen(
             .fillMaxSize()
             .background(Myty.Bg)
             .pointerInput(Unit) { detectTapGestures { selected = null } }
-            .pointerInput(Unit) {
+            .pointerInput(portrait) {
                 var total = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { total = 0f },
-                    onHorizontalDrag = { change, amount -> change.consume(); total += amount },
-                    onDragEnd = {
-                        val threshold = 60.dp.toPx()
-                        when {
-                            total < -threshold -> if (menu == MenuSide.Left) closeMenu() else openMenu(MenuSide.Right)
-                            total > threshold -> if (menu == MenuSide.Right) closeMenu() else openMenu(MenuSide.Left)
-                        }
-                    },
-                )
+                val threshold = 60.dp.toPx()
+                if (portrait) {
+                    detectVerticalDragGestures(
+                        onDragStart = { total = 0f },
+                        onVerticalDrag = { change, amount -> change.consume(); total += amount },
+                        onDragEnd = { if (abs(total) > threshold) swiped(forward = total > 0, vertical = true) },
+                    )
+                } else {
+                    detectHorizontalDragGestures(
+                        onDragStart = { total = 0f },
+                        onHorizontalDrag = { change, amount -> change.consume(); total += amount },
+                        onDragEnd = { if (abs(total) > threshold) swiped(forward = total > 0, vertical = false) },
+                    )
+                }
             }
             .padding(edge)
             .offset(shift.x.dp, shift.y.dp),
@@ -177,26 +191,13 @@ fun HomeScreen(
             )
         }
 
-        /** Tiles the menu on [side] leaves visible: the other half of the screen's columns. */
-        fun visibleBeside(side: MenuSide): (Tile) -> Boolean {
-            val half = maxOf(1, viewCols / 2)
-            val range = if (side == MenuSide.Right) 0 until half else half until viewCols
-            return { t -> grid.viewCell(t, portrait).first.let { it in range && it + t.size.w - 1 in range } }
+        /** Tiles in the half of the screen the menu on [side] leaves visible (portrait's top half is the left half). */
+        fun visibleBeside(side: MenuSide): (Tile) -> Boolean = when (side) {
+            MenuSide.Right, MenuSide.Bottom -> { t -> t.right <= grid.half }
+            MenuSide.Left, MenuSide.Top -> { t -> t.col >= grid.half }
         }
 
         val d = drag
-        // Empty space shows "+" tiles (not while dragging, when the layout is in flux).
-        if (d?.moving != true) {
-            for (gap in TileLayout.gaps(tiles, grid)) key(gap.id) {
-                GapTile(rectOf(gap), animateIn = gap.id !in initialGaps) {
-                    // Open the Tiles page on the opposite side so the space stays visible.
-                    val (c, _) = grid.viewCell(gap, portrait)
-                    val onLeft = c + gap.size.w / 2f <= viewCols / 2f
-                    openMenu(if (onLeft) MenuSide.Right else MenuSide.Left, MenuPage.Tiles, gap)
-                }
-            }
-        }
-
         val shown = if (d != null && d.moving) d.preview else tiles
 
         for (tile in shown) key(tile.id) {
@@ -213,6 +214,10 @@ fun HomeScreen(
                 animateIn = tile.id !in initialIds,
                 data = data,
                 onStyle = { onTiles(TileLayout.cycleStyle(tiles, tile.id)) },
+                onTap = {
+                    // A tap shows the tile's other reading; if a tile is being edited it just stops editing.
+                    if (selected != null) selected = null else onTiles(TileLayout.toggleAlt(tiles, tile.id))
+                },
                 onClose = { selected = null; closing = closing + tile.id },
                 onResize = { onTiles(TileLayout.resize(tiles, grid, tile.id)) },
                 onDone = { selected = null },
@@ -259,30 +264,45 @@ fun HomeScreen(
         val side = menu
         var lastSide by remember { mutableStateOf(MenuSide.Right) }
         if (side != null) lastSide = side
-        val panelW = maxWidth * (if (portrait) 0.62f else 0.5f) - Myty.Gap / 2
-        val fromLeft = lastSide == MenuSide.Left
+        // The menu covers half the screen: one side in landscape, the top or bottom half in portrait.
+        val vertical = lastSide == MenuSide.Top || lastSide == MenuSide.Bottom
+        val panelSize = if (vertical) Modifier.size(maxWidth, maxHeight / 2 - Myty.Gap / 2)
+            else Modifier.size(maxWidth / 2 - Myty.Gap / 2, maxHeight)
+        val enterSpec = spring<IntOffset>(stiffness = Spring.StiffnessMediumLow)
+        val exitSpec = tween<IntOffset>(220)
         AnimatedVisibility(
             visible = side != null,
-            modifier = Modifier.align(if (fromLeft) Alignment.CenterStart else Alignment.CenterEnd).zIndex(10f),
-            enter = slideInHorizontally(spring(stiffness = Spring.StiffnessMediumLow)) { if (fromLeft) -it else it } + fadeIn(),
-            exit = slideOutHorizontally(tween(220)) { if (fromLeft) -it else it } + fadeOut(tween(220)),
+            modifier = Modifier.align(
+                when (lastSide) {
+                    MenuSide.Left -> Alignment.CenterStart
+                    MenuSide.Right -> Alignment.CenterEnd
+                    MenuSide.Top -> Alignment.TopCenter
+                    MenuSide.Bottom -> Alignment.BottomCenter
+                }
+            ).zIndex(10f),
+            enter = fadeIn() + when (lastSide) {
+                MenuSide.Left -> slideInHorizontally(enterSpec) { -it }
+                MenuSide.Right -> slideInHorizontally(enterSpec) { it }
+                MenuSide.Top -> slideInVertically(enterSpec) { -it }
+                MenuSide.Bottom -> slideInVertically(enterSpec) { it }
+            },
+            exit = fadeOut(tween(220)) + when (lastSide) {
+                MenuSide.Left -> slideOutHorizontally(exitSpec) { -it }
+                MenuSide.Right -> slideOutHorizontally(exitSpec) { it }
+                MenuSide.Top -> slideOutVertically(exitSpec) { -it }
+                MenuSide.Bottom -> slideOutVertically(exitSpec) { it }
+            },
         ) {
             MenuPanel(
                 page = page,
                 state = state,
                 customColors = customColors,
-                modifier = Modifier.size(panelW, maxHeight),
+                modifier = panelSize,
                 onPage = { page = it },
                 onClose = ::closeMenu,
                 onAddTile = { kind ->
-                    val gap = fillGap
-                    if (gap != null) {
-                        onTiles(TileLayout.fill(tiles, grid, kind, gap))
-                        closeMenu()
-                    } else {
-                        // Put the new tile on the half of the screen the menu isn't covering.
-                        onTiles(TileLayout.add(tiles, grid, kind, visibleBeside(lastSide)))
-                    }
+                    // Put the new tile on the half of the screen the menu isn't covering.
+                    onTiles(TileLayout.add(tiles, grid, kind, visibleBeside(lastSide)))
                 },
                 onAccent = onAccent,
                 onCustomColor = onCustomColor,
@@ -306,6 +326,7 @@ private fun TileHost(
     animateIn: Boolean,
     data: TileData,
     onStyle: () -> Unit,
+    onTap: () -> Unit,
     onClose: () -> Unit,
     onResize: () -> Unit,
     onDone: () -> Unit,
@@ -328,6 +349,7 @@ private fun TileHost(
             launch { h.animateTo(rect.height, tileSpring) }
         }
     }
+    val onTapState = rememberUpdatedState(onTap)
     val pressScale by animateFloatAsState(if (selected) 0.95f else 1f, tileSpring, label = "press")
     val gone by animateFloatAsState(if (closing) 0f else 1f, tween(200), label = "close")
 
@@ -346,6 +368,7 @@ private fun TileHost(
                 clip = false
             }
             .then(gestures)
+            .pointerInput(Unit) { detectQuickTap { onTapState.value() } }
             .semantics { contentDescription = "${tile.kind.label} tile, style ${tile.style}, ${tile.size.name.lowercase()}" },
     ) {
         TileContent(tile, data, chrome = !selected, modifier = Modifier.fillMaxSize())
@@ -373,27 +396,6 @@ internal fun CornerButtons(tile: Tile, onStyle: () -> Unit, onClose: () -> Unit,
             description = "Resize tile")
         CircleIcon(Glyph.Check, Myty.White, s, Modifier.align(Alignment.BottomEnd).clickable(onClick = onDone),
             description = "Done")
-    }
-}
-
-/** Temporary "+" tile shown in empty space; tapping it opens the Tiles page to fill it. */
-@Composable
-private fun GapTile(rect: Rect, animateIn: Boolean, onClick: () -> Unit) {
-    val appear = remember { Animatable(if (animateIn) 0f else 1f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, tween(250)) }
-    val density = LocalDensity.current
-    Box(
-        Modifier
-            .offset { IntOffset(rect.left.roundToInt(), rect.top.roundToInt()) }
-            .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
-            .graphicsLayer { alpha = appear.value }
-            .clip(RoundedCornerShape(Myty.Radius))
-            .background(Myty.Tile.copy(alpha = 0.55f))
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = "Add a tile here" },
-        contentAlignment = Alignment.Center,
-    ) {
-        CircleIcon(Glyph.Plus, Myty.Dim, 26.dp)
     }
 }
 
@@ -435,5 +437,20 @@ fun Pill(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, fille
         contentAlignment = Alignment.Center,
     ) {
         Text(text, color = if (filled) Color.White else Color.Black, fontSize = 12.sp, maxLines = 1)
+    }
+}
+
+/**
+ * A tap that's released before the long-press timeout. Unlike detectTapGestures it never consumes the
+ * events of a long press, so long-press-and-drag on the same tile keeps working.
+ */
+private suspend fun PointerInputScope.detectQuickTap(onTap: () -> Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
+        if (up != null) {
+            up.consume()
+            onTap()
+        }
     }
 }

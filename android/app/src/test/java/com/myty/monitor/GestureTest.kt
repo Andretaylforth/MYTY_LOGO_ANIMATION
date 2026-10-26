@@ -119,7 +119,7 @@ class GestureTest {
         rule.waitForIdle()
         assertEquals(3, tiles.size)
         assertTrue(tiles.none { it.kind == TileKind.Network })
-        assertEquals(TileLayout.defaultLayout().filter { it.kind != TileKind.Network }, tiles)
+        assertTrue("screen stays full", TileLayout.isFull(tiles, Grid.Main))
     }
 
     @Test
@@ -133,18 +133,22 @@ class GestureTest {
     }
 
     @Test
-    fun plusTileFillsTheEmptySpace() {
-        tiles = tiles.filter { it.kind != TileKind.Network } // leaves a small gap at column 1
+    fun tapSwitchesToTheOtherReading() {
         show()
-        rule.onNodeWithContentDescription("Add a tile here").performClick()
+        rule.onRoot().at(0.75f, 0.5f) { click(it) } // CPU tile
         rule.waitForIdle()
-        rule.onNodeWithText("PROCESSES").performClick()
-        rule.mainClock.advanceTimeBy(1000)
+        assertTrue(tiles.first { it.kind == TileKind.Cpu }.alt)
+        rule.onRoot().at(0.75f, 0.5f) { click(it) }
         rule.waitForIdle()
-        val added = tiles.first { it.kind == TileKind.Processes }
-        assertEquals(Tile(added.id, TileKind.Processes, TileSize.Small, 1, 0), added)
-        rule.onNodeWithContentDescription("Add a tile here").assertDoesNotExist()
-        rule.onNodeWithText("TILES").assertDoesNotExist() // menu closed
+        assertTrue(!tiles.first { it.kind == TileKind.Cpu }.alt)
+    }
+
+    @Test
+    fun longPressIsNotATap() {
+        show()
+        rule.onRoot().at(0.75f, 0.5f) { longClick(it) }
+        rule.waitForIdle()
+        assertTrue(tiles.none { it.alt })
     }
 }
 
@@ -180,5 +184,27 @@ class PortraitGestureTest {
         rule.waitForIdle()
         val cpu = tiles.first { it.kind == TileKind.Cpu }
         assertEquals(0 to 0, cpu.col to cpu.row)
+    }
+
+    @Test
+    fun swipeDownOpensMenuFromTheTop_upFromTheBottom() {
+        rule.setContent {
+            val s = Stats.parse(File("src/test/sample.json").readText())
+            MytyTheme {
+                HomeScreen(UiState(Target("1.2.3.4", name = "PC"), s, live = true, everConnected = true), true, tiles,
+                    listOf(null, null, null), { tiles = it }, {}, { _, _ -> }, {})
+            }
+        }
+        rule.onRoot().performTouchInput { swipeDown() }
+        rule.waitForIdle()
+        val top = rule.onNodeWithText("MENU").getBoundsInRoot()
+        assertTrue("menu at the top, got $top", top.top.value < 60f)
+        rule.onRoot().performTouchInput { swipeUp() } // closes it again
+        rule.mainClock.advanceTimeBy(1000)
+        rule.onNodeWithText("MENU").assertDoesNotExist()
+        rule.onRoot().performTouchInput { swipeUp() }
+        rule.waitForIdle()
+        val bottom = rule.onNodeWithText("MENU").getBoundsInRoot()
+        assertTrue("menu in the bottom half, got $bottom", bottom.top.value > 380f)
     }
 }

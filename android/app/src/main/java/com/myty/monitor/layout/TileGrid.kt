@@ -9,7 +9,8 @@ import kotlin.random.Random
  * There's one layout: a grid of 4 columns x 4 half-rows, split down the middle into two 2-column halves.
  * Landscape shows the halves side by side; portrait stacks the right half under the left one, so every
  * tile keeps its place when the phone rotates. That's why no tile may straddle the middle line.
- * Tiles come in four sizes measured in cells. Gaps are allowed (closing a tile leaves one).
+ * Tiles come in four sizes measured in cells, and the screen is always kept full: whenever a tile is
+ * closed, shrunk, moved or added, the others grow, shrink or shift to fill the space (see [TileLayout.fill]).
  * Everything here is plain Kotlin so it can be unit tested without a device.
  */
 
@@ -21,7 +22,7 @@ enum class TileSize(val w: Int, val h: Int) {
 }
 
 enum class TileKind(val label: String, val styles: Int) {
-    Cpu("CPU", 4), Gpu("GPU", 4), Ram("RAM", 4), Network("NETWORK", 1), Storage("STORAGE", 1), Processes("PROCESSES", 1),
+    Cpu("CPU", 6), Gpu("GPU", 5), Ram("RAM", 4), Network("NETWORK", 1), Storage("STORAGE", 1), Processes("PROCESSES", 1),
 }
 
 data class Tile(
@@ -30,8 +31,10 @@ data class Tile(
     val size: TileSize,
     val col: Int,
     val row: Int,
-    /** 1..kind.styles: ring, fill, orbit, dot grid. */
+    /** 1..kind.styles: ring, fill, orbit, dot grid, block, per-core bars. */
     val style: Int = 1,
+    /** Showing the alternate reading (e.g. load instead of temperature); a single tap toggles it. */
+    val alt: Boolean = false,
 ) {
     val right get() = col + size.w
     val bottom get() = row + size.h
@@ -87,83 +90,127 @@ object TileLayout {
         val old = tiles.firstOrNull { it.id == id } ?: return null
         val moved = grid.clamp(old.at(col, row))
         if (moved.col == old.col && moved.row == old.row) return tiles
-        return place(tiles.filter { it.id != id }, grid, moved, vacated = old, growIntoFreedSpace = true)
+        val placed = place(tiles.filter { it.id != id }, grid, moved, vacated = old, growIntoFreedSpace = true) ?: return null
+        val dropped = placed.first { it.id == id }
+        // A drop spot that can't be part of a full screen is refused (the preview stays where it was).
+        return fill(placed, grid, pinned = dropped)
     }
 
-    /** Next size in the cycle that can be made to fit; neighbours shrink or move aside as needed. */
+    /** Next size in the cycle that the screen can be rearranged around; neighbours shrink, grow or move as needed. */
     fun resize(tiles: List<Tile>, grid: Grid, id: Long): List<Tile> {
         val old = tiles.firstOrNull { it.id == id } ?: return tiles
         var size = old.size.next()
         repeat(TileSize.entries.size - 1) {
             if (grid.canFit(size)) {
                 val resized = grid.clamp(old.at(old.col, old.row, size))
-                place(tiles.filter { it.id != id }, grid, resized, vacated = null, growIntoFreedSpace = false)
-                    ?.let { return it }
+                val placed = place(tiles.filter { it.id != id }, grid, resized, vacated = null, growIntoFreedSpace = false)
+                if (placed != null) fill(placed, grid, pinned = resized)?.let { return it }
             }
             size = size.next()
         }
         return tiles
     }
 
-    fun remove(tiles: List<Tile>, id: Long) = tiles.filter { it.id != id }
+    /** Removes a tile; the others spread out to fill its space. */
+    fun remove(tiles: List<Tile>, grid: Grid, id: Long): List<Tile> {
+        val rest = tiles.filter { it.id != id }
+        return fill(rest, grid) ?: rest
+    }
 
     fun cycleStyle(tiles: List<Tile>, id: Long) = tiles.map {
         if (it.id == id) it.copy(style = it.style % it.kind.styles + 1) else it
     }
 
+    fun toggleAlt(tiles: List<Tile>, id: Long) = tiles.map { if (it.id == id) it.copy(alt = !it.alt) else it }
+
     /**
-     * Adds a tile. It goes into an empty gap if there is one (preferring [side]); otherwise into a random
-     * spot on [side], shrinking whatever is there to make room.
-     * [side]: columns to prefer, e.g. the half of the screen the menu isn't covering.
+     * Adds a tile at a random spot on [side] (e.g. the half of the screen the menu isn't covering);
+     * the other tiles shrink or move to make room.
      */
     fun add(tiles: List<Tile>, grid: Grid, kind: TileKind, side: (Tile) -> Boolean, random: Random = Random.Default): List<Tile> {
         val id = (tiles.maxOfOrNull { it.id } ?: 0) + 1
-        val sizes = listOf(TileSize.Wide, TileSize.Small, TileSize.Tiny).filter { grid.canFit(it) }
-
-        // 1. An empty gap: biggest size that fits (up to Wide), on the preferred side first.
-        for (preferSide in listOf(true, false)) {
-            for (s in sizes) {
-                val spot = positions(grid, s)
-                    .map { (c, r) -> Tile(id, kind, s, c, r) }
-                    .firstOrNull { (!preferSide || side(it)) && isFree(it, tiles, grid) }
-                if (spot != null) return tiles + spot
-            }
-        }
-
-        // 2. No gap: make room on the preferred side.
         for (s in listOf(TileSize.Small, TileSize.Tiny)) {
             val spots = positions(grid, s).map { (c, r) -> Tile(id, kind, s, c, r) }
                 .filter { grid.contains(it) && side(it) }.shuffled(random)
             for (t in spots) {
-                place(tiles, grid, t, vacated = null, growIntoFreedSpace = false)?.let { return it }
+                val placed = place(tiles, grid, t, vacated = null, growIntoFreedSpace = false) ?: continue
+                fill(placed, grid, pinned = t)?.let { return it }
             }
         }
         return tiles
     }
 
-    /** Fills an empty space shown as a "+" tile with a new tile of that size. */
-    fun fill(tiles: List<Tile>, grid: Grid, kind: TileKind, gap: Tile): List<Tile> {
-        val id = (tiles.maxOfOrNull { it.id } ?: 0) + 1
-        val t = Tile(id, kind, gap.size, gap.col, gap.row)
-        return if (isFree(t, tiles, grid)) tiles + t else add(tiles, grid, kind, side = { true })
-    }
+    /** True if every cell is covered. */
+    fun isFull(tiles: List<Tile>, grid: Grid) = tiles.sumOf { it.size.w * it.size.h } == grid.cols * grid.rows &&
+        tiles.all { grid.contains(it) } && tiles.none { a -> tiles.any { b -> a.id != b.id && a.overlaps(b) } }
 
     /**
-     * Empty space, covered with as few placeholder tiles as possible (biggest first, top-left first).
-     * Placeholder ids are negative and stable for a given spot and size.
+     * Rearranges [tiles] so they cover the whole screen, changing as little as possible: tiles keep their
+     * size and place where they can, otherwise grow (preferred), shrink, or move — even to the other half.
+     * [pinned] keeps its exact size and position (the tile the user just moved, resized or added).
+     * Returns null if no arrangement exists (e.g. more tiles than cells).
      */
-    fun gaps(tiles: List<Tile>, grid: Grid): List<Tile> {
-        val taken = tiles.toMutableList()
-        val out = mutableListOf<Tile>()
-        for (r in 0 until grid.rows) for (c in 0 until grid.cols) {
-            val cell = Tile(0, TileKind.Cpu, TileSize.Tiny, c, r)
-            if (!isFree(cell, taken, grid)) continue
-            val s = TileSize.entries.reversed().first { isFree(cell.at(c, r, it), taken, grid) }
-            val gap = Tile(-(1L + c + r * grid.cols + s.ordinal * 100L), TileKind.Cpu, s, c, r)
-            out += gap
-            taken += gap
+    fun fill(tiles: List<Tile>, grid: Grid, pinned: Tile? = null): List<Tile>? {
+        if (isFull(tiles, grid)) return tiles
+        val free = tiles.filter { it.id != pinned?.id }
+        if (free.size > 20) return null
+        val cells = grid.cols * grid.rows
+        // Cells in reading order: the left half row by row, then the right half (also portrait's order).
+        val order = (0 until cells / grid.half / grid.rows).flatMap { h ->
+            (0 until grid.rows).flatMap { r -> (0 until grid.half).map { c -> h * grid.half + c to r } }
         }
-        return out
+        fun bit(c: Int, r: Int) = 1L shl (r * grid.cols + c)
+        fun mask(t: Tile): Long {
+            var m = 0L
+            for (r in t.row until t.bottom) for (c in t.col until t.right) m = m or bit(c, r)
+            return m
+        }
+        val full = (1L shl cells) - 1
+        val start = pinned?.let { if (grid.contains(it)) mask(it) else return null } ?: 0L
+
+        // Cost of turning tile t into t2: growing is cheap, shrinking dearer, moving a little, changing halves more.
+        fun cost(t: Tile, t2: Tile): Int {
+            val da = t2.size.w * t2.size.h - t.size.w * t.size.h
+            val sizeCost = if (da >= 0) da * 3 else -da * 5
+            val halfCost = if (t.col / grid.half != t2.col / grid.half) 6 else 0
+            return sizeCost + abs(t.col - t2.col) + abs(t.row - t2.row) + halfCost
+        }
+
+        val seen = HashMap<Long, Int>()
+        var best: List<Tile>? = null
+        var bestCost = Int.MAX_VALUE
+        var nodes = 0
+        val chosen = arrayOfNulls<Tile>(free.size)
+
+        fun search(occ: Long, remaining: Int, spent: Int) {
+            if (spent >= bestCost || ++nodes > 400_000) return
+            val key = occ * 1_048_576 + remaining
+            if ((seen[key] ?: Int.MAX_VALUE) <= spent) return
+            seen[key] = spent
+            if (occ == full) {
+                if (remaining == 0) { best = chosen.filterNotNull() + listOfNotNull(pinned); bestCost = spent }
+                return
+            }
+            if (remaining == 0) return
+            val (c, r) = order.first { (c, r) -> occ and bit(c, r) == 0L }
+            for (i in free.indices) {
+                if (remaining and (1 shl i) == 0) continue
+                val t = free[i]
+                for (size in TileSize.entries) {
+                    val t2 = t.at(c, r, size)
+                    if (!grid.contains(t2)) continue
+                    val m = mask(t2)
+                    if (occ and m != 0L) continue
+                    chosen[i] = t2
+                    search(occ or m, remaining and (1 shl i).inv(), spent + cost(t, t2))
+                    chosen[i] = null
+                }
+            }
+        }
+        search(start, (1 shl free.size) - 1, 0)
+        // Keep the original list order so ids/keys stay stable for the UI.
+        val result = best ?: return null
+        return tiles.map { t -> result.first { it.id == t.id } }
     }
 
     // ---------------------------------------------------------------------------------------------

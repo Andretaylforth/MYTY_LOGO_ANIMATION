@@ -12,7 +12,11 @@ data class CpuStats(
     val clock: Double?,
     val fan: Double?,
     val power: Double?,
+    val cores: List<CoreStats> = emptyList(),
 )
+
+/** One CPU core; temp is null where the CPU doesn't report it per core. */
+data class CoreStats(val name: String, val temp: Double?, val clock: Double?, val load: Double?)
 
 data class GpuStats(
     val name: String,
@@ -57,6 +61,9 @@ data class Stats(
                     clock = c.num("clock"),
                     fan = c.num("fan"),
                     power = c.num("power"),
+                    cores = c.optJSONArray("cores").objects().map {
+                        CoreStats(it.optString("name"), it.num("temp"), it.num("clock"), it.num("load"))
+                    },
                 ),
                 gpu = g?.let {
                     GpuStats(

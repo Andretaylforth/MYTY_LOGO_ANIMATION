@@ -118,7 +118,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun tilesToJson(tiles: List<Tile>) = JSONArray(tiles.map {
         JSONObject().put("id", it.id).put("kind", it.kind.name).put("size", it.size.name)
-            .put("col", it.col).put("row", it.row).put("style", it.style)
+            .put("col", it.col).put("row", it.row).put("style", it.style).put("alt", it.alt)
     }).toString()
 
     private fun tilesFromJson(text: String?, grid: Grid): List<Tile> {
@@ -135,10 +135,12 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                     col = o.getInt("col"),
                     row = o.getInt("row"),
                     style = o.optInt("style", 1),
+                    alt = o.optBoolean("alt", false),
                 ))
                 if (TileLayout.isFree(t, placed, grid)) placed += t // drop anything corrupt
             }
-            placed
+            // Older versions allowed empty space; spread the tiles out to fill it.
+            TileLayout.fill(placed, grid) ?: TileLayout.defaultLayout()
         }.getOrElse { TileLayout.defaultLayout() }
     }
 

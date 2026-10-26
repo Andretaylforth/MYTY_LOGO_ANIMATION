@@ -9,7 +9,11 @@ public sealed record CpuStats(
     double? Temp,     // °C
     double? Clock,    // MHz (fastest core)
     double? Fan,      // RPM
-    double? Power);   // W
+    double? Power,    // W
+    IReadOnlyList<CoreStats> Cores);
+
+/// <summary>One CPU core. Temperature is null where the CPU doesn't report it per core (most Ryzens).</summary>
+public sealed record CoreStats(string Name, double? Temp, double? Clock, double? Load); // °C, MHz, %
 
 public sealed record GpuStats(
     string Name,
