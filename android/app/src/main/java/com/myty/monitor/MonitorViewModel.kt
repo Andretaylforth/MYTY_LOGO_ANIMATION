@@ -41,10 +41,9 @@ data class UiState(
     val netUp: List<Float> = emptyList(),
 )
 
-/** Home screen look: tile layouts (one per orientation) and colours. */
+/** Home screen look: the tile layout (shared by both orientations) and colours. */
 data class Look(
-    val landscape: List<Tile>,
-    val portrait: List<Tile>,
+    val tiles: List<Tile>,
     val accent: Color,
     val custom: List<Color?>,
 )
@@ -87,9 +86,9 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { UiState() }
     }
 
-    fun setTiles(landscape: Boolean, tiles: List<Tile>) {
-        _look.update { if (landscape) it.copy(landscape = tiles) else it.copy(portrait = tiles) }
-        prefs.edit().putString(if (landscape) "tiles_land" else "tiles_port", tilesToJson(tiles)).apply()
+    fun setTiles(tiles: List<Tile>) {
+        _look.update { it.copy(tiles = tiles) }
+        prefs.edit().putString("tiles", tilesToJson(tiles)).apply()
     }
 
     fun setAccent(c: Color) {
@@ -110,8 +109,8 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             for (i in 0 until minOf(a.length(), CUSTOM_SLOTS)) if (!a.isNull(i)) custom[i] = Color(a.getInt(i))
         }
         return Look(
-            landscape = tilesFromJson(prefs.getString("tiles_land", null), Grid.Landscape),
-            portrait = tilesFromJson(prefs.getString("tiles_port", null), Grid.Portrait),
+            // Older versions kept a separate layout per orientation; carry the landscape one over.
+            tiles = tilesFromJson(prefs.getString("tiles", null) ?: prefs.getString("tiles_land", null), Grid.Main),
             accent = if (prefs.contains("accent")) Color(prefs.getInt("accent", 0)) else Myty.Blue,
             custom = custom,
         )
@@ -123,24 +122,24 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     }).toString()
 
     private fun tilesFromJson(text: String?, grid: Grid): List<Tile> {
-        if (text == null) return TileLayout.defaultLayout(grid)
+        if (text == null) return TileLayout.defaultLayout()
         return runCatching {
             val a = JSONArray(text)
             val placed = mutableListOf<Tile>()
             for (i in 0 until a.length()) {
                 val o = a.getJSONObject(i)
-                val t = Tile(
+                val t = grid.clamp(Tile(
                     id = o.getLong("id"),
                     kind = TileKind.valueOf(o.getString("kind")),
                     size = TileSize.valueOf(o.getString("size")),
                     col = o.getInt("col"),
                     row = o.getInt("row"),
                     style = o.optInt("style", 1),
-                )
+                ))
                 if (TileLayout.isFree(t, placed, grid)) placed += t // drop anything corrupt
             }
             placed
-        }.getOrElse { TileLayout.defaultLayout(grid) }
+        }.getOrElse { TileLayout.defaultLayout() }
     }
 
     private suspend fun kotlinx.coroutines.CoroutineScope.pollLoop(target: Target) {

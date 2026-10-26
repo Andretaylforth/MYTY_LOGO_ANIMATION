@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
-/** Scenarios from the design brief, on the landscape grid (4 columns x 4 half-rows). */
+/** Scenarios from the design brief, on the grid (4 columns x 4 half-rows, split into two halves). */
 class TileLayoutTest {
-    private val grid = Grid.Landscape
+    private val grid = Grid.Main
 
     // Screenshot 1: two small tiles top-left, a wide tile under them, a large tile on the right.
     private val topLeft = Tile(1, TileKind.Cpu, TileSize.Small, 0, 0)
@@ -90,7 +90,7 @@ class TileLayoutTest {
     fun closeLeavesGap_addFillsIt() {
         val closed = TileLayout.remove(home, topMid.id)
         assertEquals(3, closed.size)
-        val added = TileLayout.add(closed, grid, TileKind.Gpu, side = 0..1)
+        val added = TileLayout.add(closed, grid, TileKind.Gpu, side = { it.right <= 2 })
         assertValid(added)
         val new = added.first { it.kind == TileKind.Gpu }
         assertEquals(1 to 0, new.col to new.row)
@@ -99,7 +99,7 @@ class TileLayoutTest {
     @Test
     fun addWhenFull_makesRoomOnPreferredSide() {
         repeat(20) { seed ->
-            val added = TileLayout.add(home, grid, TileKind.Network, side = 2..3, random = Random(seed))
+            val added = TileLayout.add(home, grid, TileKind.Network, side = { it.col >= 2 }, random = Random(seed))
             assertValid(added)
             assertEquals(5, added.size)
             val new = added.first { it.kind == TileKind.Network }
@@ -120,5 +120,47 @@ class TileLayoutTest {
             TileLayout.move(home, grid, id, c, r)?.let(::assertValid)
         }
         assertNotNull(TileLayout.move(home, grid, 4, 0, 0))
+    }
+
+    @Test
+    fun noTileStraddlesTheMiddle() {
+        assertTrue(!grid.contains(Tile(9, TileKind.Cpu, TileSize.Wide, 1, 0)))
+        // Growing a small tile in column 1 to wide keeps it in the left half.
+        val single = listOf(Tile(1, TileKind.Cpu, TileSize.Small, 1, 0))
+        val grown = TileLayout.resize(single, grid, 1)[0]
+        assertEquals(TileSize.Wide to 0, grown.size to grown.col)
+        // Dragging a wide tile to column 1 snaps it to a half.
+        for (c in 0..3) TileLayout.move(home, grid, bottomLeft.id, c, 2)?.let(::assertValid)
+    }
+
+    @Test
+    fun gapsCoverExactlyTheEmptySpace() {
+        assertEquals(emptyList<Tile>(), TileLayout.gaps(home, grid))
+        val closed = TileLayout.remove(home, big.id)
+        assertEquals(listOf(TileSize.Large to (2 to 0)), TileLayout.gaps(closed, grid).map { it.size to (it.col to it.row) })
+        val two = TileLayout.remove(home, topMid.id)
+        val gaps = TileLayout.gaps(two, grid)
+        assertEquals(listOf(Tile(gaps[0].id, TileKind.Cpu, TileSize.Small, 1, 0)), gaps)
+        assertTrue(gaps.all { it.id < 0 })
+        // Filling a gap puts a tile of that size exactly there.
+        val filled = TileLayout.fill(two, grid, TileKind.Storage, gaps[0])
+        assertEquals(TileSize.Small to (1 to 0), filled.first { it.kind == TileKind.Storage }.let { it.size to (it.col to it.row) })
+        assertEquals(emptyList<Tile>(), TileLayout.gaps(filled, grid))
+        // An empty screen is two large gaps, one per half.
+        assertEquals(2, TileLayout.gaps(emptyList(), grid).size)
+    }
+
+    @Test
+    fun portraitStacksTheRightHalfUnderTheLeft() {
+        assertEquals(0 to 0, grid.viewCell(topLeft, portrait = true))
+        assertEquals(1 to 0, grid.viewCell(topMid, portrait = true))
+        assertEquals(0 to 2, grid.viewCell(bottomLeft, portrait = true))
+        assertEquals(0 to 4, grid.viewCell(big, portrait = true))
+        for (t in home) {
+            val (vc, vr) = grid.viewCell(t, portrait = true)
+            assertEquals(t.col to t.row, grid.modelCell(vc, vr, portrait = true))
+        }
+        assertEquals(2 to 4, grid.viewCols(true) to grid.viewRows(false))
+        assertEquals(8, grid.viewRows(true))
     }
 }

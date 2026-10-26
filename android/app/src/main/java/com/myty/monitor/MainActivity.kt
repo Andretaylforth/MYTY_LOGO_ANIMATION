@@ -24,7 +24,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myty.monitor.ui.ConnectScreen
-import com.myty.monitor.layout.Grid
 import com.myty.monitor.ui.HomeScreen
 import com.myty.monitor.ui.Myty
 import com.myty.monitor.ui.MytyTheme
@@ -67,10 +66,10 @@ private fun App(vm: MonitorViewModel) {
             CompositionLocalProvider(LocalDensity provides Density(density.density * scale, fontScale = 1f)) {
                 HomeScreen(
                     state = state,
-                    grid = if (landscape) Grid.Landscape else Grid.Portrait,
-                    tiles = if (landscape) look.landscape else look.portrait,
+                    portrait = !landscape,
+                    tiles = look.tiles,
                     customColors = look.custom,
-                    onTiles = { vm.setTiles(landscape, it) },
+                    onTiles = vm::setTiles,
                     onAccent = vm::setAccent,
                     onCustomColor = vm::setCustomColor,
                     onChangePc = vm::disconnect,

@@ -28,13 +28,13 @@ import java.io.File
 class GestureTest {
     @get:Rule val rule = createComposeRule()
 
-    private var tiles by mutableStateOf(TileLayout.defaultLayout(Grid.Landscape))
+    private var tiles by mutableStateOf(TileLayout.defaultLayout())
     private var accent: Color? = null
 
-    private fun show() = rule.setContent {
+    private fun show(portrait: Boolean = false) = rule.setContent {
         val s = Stats.parse(File("src/test/sample.json").readText())
         MytyTheme {
-            HomeScreen(UiState(Target("1.2.3.4", name = "PC"), s, live = true, everConnected = true), Grid.Landscape, tiles,
+            HomeScreen(UiState(Target("1.2.3.4", name = "PC"), s, live = true, everConnected = true), portrait, tiles,
                 listOf(Color.Blue, null, null), { tiles = it }, { accent = it }, { _, _ -> }, {})
         }
     }
@@ -119,6 +119,66 @@ class GestureTest {
         rule.waitForIdle()
         assertEquals(3, tiles.size)
         assertTrue(tiles.none { it.kind == TileKind.Network })
-        assertEquals(TileLayout.defaultLayout(Grid.Landscape).filter { it.kind != TileKind.Network }, tiles)
+        assertEquals(TileLayout.defaultLayout().filter { it.kind != TileKind.Network }, tiles)
+    }
+
+    @Test
+    fun tickButtonFinishesEditing() {
+        show()
+        rule.onRoot().at(0.75f, 0.5f) { longClick(it) }
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Done").performClick()
+        rule.mainClock.advanceTimeBy(1000)
+        rule.onNodeWithText("2").assertDoesNotExist()
+    }
+
+    @Test
+    fun plusTileFillsTheEmptySpace() {
+        tiles = tiles.filter { it.kind != TileKind.Network } // leaves a small gap at column 1
+        show()
+        rule.onNodeWithContentDescription("Add a tile here").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("PROCESSES").performClick()
+        rule.mainClock.advanceTimeBy(1000)
+        rule.waitForIdle()
+        val added = tiles.first { it.kind == TileKind.Processes }
+        assertEquals(Tile(added.id, TileKind.Processes, TileSize.Small, 1, 0), added)
+        rule.onNodeWithContentDescription("Add a tile here").assertDoesNotExist()
+        rule.onNodeWithText("TILES").assertDoesNotExist() // menu closed
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = "w400dp-h800dp-port", sdk = [34])
+class PortraitGestureTest {
+    @get:Rule val rule = createComposeRule()
+    private var tiles by mutableStateOf(TileLayout.defaultLayout())
+
+    @Test
+    fun rightHalfSitsBelowLeftHalf() {
+        rule.setContent {
+            val s = Stats.parse(File("src/test/sample.json").readText())
+            MytyTheme {
+                HomeScreen(UiState(Target("1.2.3.4", name = "PC"), s, live = true, everConnected = true), true, tiles,
+                    listOf(null, null, null), { tiles = it }, {}, { _, _ -> }, {})
+            }
+        }
+        // The large CPU tile (right half in landscape) fills the bottom half in portrait.
+        rule.onRoot().performTouchInput { longClick(Offset(width * 0.5f, height * 0.75f)) }
+        rule.waitForIdle()
+        rule.onNodeWithText("2").assertExists()
+        // Dragging it to the top swaps the halves, just like dragging it left in landscape.
+        rule.onNodeWithContentDescription("Done").performClick()
+        rule.onRoot().performTouchInput {
+            down(Offset(width * 0.5f, height * 0.75f))
+            advanceEventTime(1000)
+            moveBy(Offset(0f, -20f))
+            repeat(20) { moveBy(Offset(0f, -height * 0.5f / 20)) }
+            up()
+        }
+        rule.waitForIdle()
+        val cpu = tiles.first { it.kind == TileKind.Cpu }
+        assertEquals(0 to 0, cpu.col to cpu.row)
     }
 }

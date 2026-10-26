@@ -6,7 +6,9 @@ import kotlin.random.Random
 /*
  * Live-tile layout, in the spirit of the Windows Phone start screen.
  *
- * The screen is a fixed grid of cells: 4 columns x 4 half-rows in landscape, 2 x 8 in portrait.
+ * There's one layout: a grid of 4 columns x 4 half-rows, split down the middle into two 2-column halves.
+ * Landscape shows the halves side by side; portrait stacks the right half under the left one, so every
+ * tile keeps its place when the phone rotates. That's why no tile may straddle the middle line.
  * Tiles come in four sizes measured in cells. Gaps are allowed (closing a tile leaves one).
  * Everything here is plain Kotlin so it can be unit tested without a device.
  */
@@ -38,17 +40,36 @@ data class Tile(
     fun at(c: Int, r: Int, s: TileSize = size) = copy(col = c, row = r, size = s)
 }
 
-data class Grid(val cols: Int, val rows: Int) {
-    fun contains(t: Tile) = t.col >= 0 && t.row >= 0 && t.right <= cols && t.bottom <= rows
+data class Grid(val cols: Int, val rows: Int, val half: Int = cols) {
+    private fun straddles(col: Int, w: Int) = col < half && col + w > half
 
-    /** Moves [t] back inside the grid if it hangs off an edge. */
-    fun clamp(t: Tile) = t.at(t.col.coerceIn(0, maxOf(0, cols - t.size.w)), t.row.coerceIn(0, maxOf(0, rows - t.size.h)))
+    fun contains(t: Tile) =
+        t.col >= 0 && t.row >= 0 && t.right <= cols && t.bottom <= rows && !straddles(t.col, t.size.w)
 
-    fun canFit(s: TileSize) = s.w <= cols && s.h <= rows
+    /** Moves [t] back inside the grid (and off the middle line) if it hangs over an edge. */
+    fun clamp(t: Tile): Tile {
+        var col = t.col.coerceIn(0, maxOf(0, cols - t.size.w))
+        val row = t.row.coerceIn(0, maxOf(0, rows - t.size.h))
+        if (straddles(col, t.size.w)) col = if (col + t.size.w / 2.0 <= half) half - t.size.w else half
+        return t.at(col, row)
+    }
+
+    fun canFit(s: TileSize) = s.w <= minOf(half, cols) && s.h <= rows
+
+    /** Where [t] sits on screen: unchanged in landscape; in portrait the right half moves below the left. */
+    fun viewCell(t: Tile, portrait: Boolean): Pair<Int, Int> =
+        if (!portrait) t.col to t.row else t.col % half to t.row + (t.col / half) * rows
+
+    /** Inverse of [viewCell] for a drop target. */
+    fun modelCell(viewCol: Int, viewRow: Int, portrait: Boolean): Pair<Int, Int> =
+        if (!portrait) viewCol to viewRow
+        else viewCol.coerceIn(0, half - 1) + (if (viewRow >= rows) half else 0) to viewRow.mod(rows)
+
+    fun viewCols(portrait: Boolean) = if (portrait) half else cols
+    fun viewRows(portrait: Boolean) = if (portrait) rows * (cols / half) else rows
 
     companion object {
-        val Landscape = Grid(4, 4)
-        val Portrait = Grid(2, 8)
+        val Main = Grid(4, 4, half = 2)
     }
 }
 
@@ -95,7 +116,7 @@ object TileLayout {
      * spot on [side], shrinking whatever is there to make room.
      * [side]: columns to prefer, e.g. the half of the screen the menu isn't covering.
      */
-    fun add(tiles: List<Tile>, grid: Grid, kind: TileKind, side: IntRange, random: Random = Random.Default): List<Tile> {
+    fun add(tiles: List<Tile>, grid: Grid, kind: TileKind, side: (Tile) -> Boolean, random: Random = Random.Default): List<Tile> {
         val id = (tiles.maxOfOrNull { it.id } ?: 0) + 1
         val sizes = listOf(TileSize.Wide, TileSize.Small, TileSize.Tiny).filter { grid.canFit(it) }
 
@@ -103,21 +124,46 @@ object TileLayout {
         for (preferSide in listOf(true, false)) {
             for (s in sizes) {
                 val spot = positions(grid, s)
-                    .filter { (c, _) -> !preferSide || c in side && c + s.w - 1 in side }
                     .map { (c, r) -> Tile(id, kind, s, c, r) }
-                    .firstOrNull { isFree(it, tiles, grid) }
+                    .firstOrNull { (!preferSide || side(it)) && isFree(it, tiles, grid) }
                 if (spot != null) return tiles + spot
             }
         }
 
         // 2. No gap: make room on the preferred side.
         for (s in listOf(TileSize.Small, TileSize.Tiny)) {
-            val spots = positions(grid, s).filter { (c, _) -> c in side && c + s.w - 1 in side }.shuffled(random)
-            for ((c, r) in spots) {
-                place(tiles, grid, Tile(id, kind, s, c, r), vacated = null, growIntoFreedSpace = false)?.let { return it }
+            val spots = positions(grid, s).map { (c, r) -> Tile(id, kind, s, c, r) }
+                .filter { grid.contains(it) && side(it) }.shuffled(random)
+            for (t in spots) {
+                place(tiles, grid, t, vacated = null, growIntoFreedSpace = false)?.let { return it }
             }
         }
         return tiles
+    }
+
+    /** Fills an empty space shown as a "+" tile with a new tile of that size. */
+    fun fill(tiles: List<Tile>, grid: Grid, kind: TileKind, gap: Tile): List<Tile> {
+        val id = (tiles.maxOfOrNull { it.id } ?: 0) + 1
+        val t = Tile(id, kind, gap.size, gap.col, gap.row)
+        return if (isFree(t, tiles, grid)) tiles + t else add(tiles, grid, kind, side = { true })
+    }
+
+    /**
+     * Empty space, covered with as few placeholder tiles as possible (biggest first, top-left first).
+     * Placeholder ids are negative and stable for a given spot and size.
+     */
+    fun gaps(tiles: List<Tile>, grid: Grid): List<Tile> {
+        val taken = tiles.toMutableList()
+        val out = mutableListOf<Tile>()
+        for (r in 0 until grid.rows) for (c in 0 until grid.cols) {
+            val cell = Tile(0, TileKind.Cpu, TileSize.Tiny, c, r)
+            if (!isFree(cell, taken, grid)) continue
+            val s = TileSize.entries.reversed().first { isFree(cell.at(c, r, it), taken, grid) }
+            val gap = Tile(-(1L + c + r * grid.cols + s.ordinal * 100L), TileKind.Cpu, s, c, r)
+            out += gap
+            taken += gap
+        }
+        return out
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -215,15 +261,10 @@ object TileLayout {
         }
     }
 
-    fun defaultLayout(grid: Grid): List<Tile> = if (grid.cols >= 4) listOf(
+    fun defaultLayout(): List<Tile> = listOf(
         Tile(1, TileKind.Ram, TileSize.Small, 0, 0, style = 3),
         Tile(2, TileKind.Network, TileSize.Small, 1, 0),
         Tile(3, TileKind.Gpu, TileSize.Wide, 0, 2, style = 1),
         Tile(4, TileKind.Cpu, TileSize.Large, 2, 0, style = 2),
-    ) else listOf(
-        Tile(1, TileKind.Cpu, TileSize.Large, 0, 0, style = 2),
-        Tile(2, TileKind.Gpu, TileSize.Wide, 0, 4, style = 1),
-        Tile(3, TileKind.Ram, TileSize.Small, 0, 6, style = 3),
-        Tile(4, TileKind.Network, TileSize.Small, 1, 6),
     )
 }

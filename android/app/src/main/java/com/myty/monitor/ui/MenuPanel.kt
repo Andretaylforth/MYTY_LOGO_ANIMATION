@@ -77,7 +77,7 @@ fun MenuPanel(
             .background(Myty.White)
             // Swallow taps/swipes so they don't reach the tiles underneath.
             .pointerInput(Unit) { detectTapGestures { } }
-            .padding(6.dp),
+            .padding(10.dp),
     ) {
         AnimatedContent(page, transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) }, label = "menu") { p ->
             val title = when (p) {
@@ -119,7 +119,7 @@ private fun RootPage(state: UiState, onPage: (MenuPage) -> Unit, onChangePc: () 
         )
         Pill("CHANGE PC", onChangePc, filled = false, modifier = Modifier.padding(start = 2.dp))
         Spacer(Modifier.weight(1f))
-        Row(Modifier.fillMaxWidth().fillMaxHeight(0.62f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().fillMaxHeight(0.62f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MenuCard("TILES", Glyph.Plus, Modifier.weight(1f)) { onPage(MenuPage.Tiles) }
             MenuCard("COLOURS", Glyph.Dropper, Modifier.weight(1f)) { onPage(MenuPage.Colours) }
         }

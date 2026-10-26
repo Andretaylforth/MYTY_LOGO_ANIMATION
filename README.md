@@ -4,6 +4,10 @@ Live PC stats (CPU and GPU temperatures, load, clocks, fans, RAM, network, stora
 
 ![Home screen](docs/home.png)
 
+Portrait keeps the same layout, with the right half below the left:
+
+<img src="docs/portrait.png" width="220" alt="Portrait">
+
 It has two parts:
 
 | Folder | What it is |
@@ -57,7 +61,7 @@ There are two ways to connect over a cable:
 
 ## The home screen
 
-The phone shows a grid of live tiles, inspired by Windows Phone. The grid is 4 columns × 4 half-rows in landscape, and 2 × 8 in portrait; each orientation keeps its own layout.
+The phone shows a grid of live tiles, inspired by Windows Phone. There's one layout: 4 columns × 4 half-rows, split into a left and a right half. Landscape shows the halves side by side; portrait stacks the right half under the left, so every tile keeps its place when you rotate the phone. A wide or large tile always sits within one half.
 
 - **Tiles**: CPU, GPU, RAM, Network, Storage and Processes. CPU and GPU tiles show temperature; the RAM tile shows memory use.
 - **Sizes**: tiny (1 × ½), small (1 × 1), wide (2 × 1) and large (2 × 2).
@@ -68,8 +72,10 @@ The phone shows a grid of live tiles, inspired by Windows Phone. The grid is 4 c
 - **Long-press a tile** and it shrinks slightly and shows its corner buttons:
   - top-left (number): next style
   - top-right (×): close the tile; its space stays empty
-  - bottom-right (arrows): next size, smallest to biggest and back round
-- **Tap anywhere else** to put the tile back to normal.
+  - bottom-left (arrows): next size, smallest to biggest and back round
+  - bottom-right (tick): done
+- **Tap anywhere else** also puts the tile back to normal.
+- **Empty space** shows a `+` tile. Tap it to open the Tiles menu on the other side of the screen; the tile you pick fills that space.
 - **Long-press and drag** to move a tile. Tiles in the way jump into the space it left. If they don't fit there, they shrink to make room (for example, a large tile halves). Tiles next to the gap slide over to fill it. Let go to drop it.
 - **Swipe left or right** to open the menu on the other side of the screen:
   - **Tiles** adds a tile. It goes into an empty gap if there is one, otherwise onto the visible half of the screen, shrinking tiles there to fit.

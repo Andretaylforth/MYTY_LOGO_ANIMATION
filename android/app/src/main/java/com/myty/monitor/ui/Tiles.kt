@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -41,6 +43,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -48,6 +52,8 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.roundToInt
 import com.myty.monitor.data.Stats
 import com.myty.monitor.layout.Tile
 import com.myty.monitor.layout.TileKind
@@ -117,9 +123,12 @@ fun TileContent(tile: Tile, data: TileData, chrome: Boolean, modifier: Modifier 
 
 // ---- Shared pieces -------------------------------------------------------------------------------
 
-@Suppress("UNUSED_PARAMETER")
-private fun labelSize(size: TileSize) = 10.sp
-private fun pad(size: TileSize): Dp = if (size == TileSize.Tiny) 4.dp else 6.dp
+private fun labelSize(size: TileSize) = if (size == TileSize.Tiny) 10.sp else 12.sp
+private fun pad(size: TileSize): Dp = if (size == TileSize.Tiny) 8.dp else 12.dp
+
+/** Corner buttons on a selected tile: size, and inset from the tile's edge. */
+internal fun buttonSize(size: TileSize): Dp = if (size == TileSize.Tiny) 20.dp else 26.dp
+internal fun buttonPad(size: TileSize): Dp = if (size == TileSize.Tiny) 6.dp else 10.dp
 
 /**
  * Corner labels: name top-left, load top-right, model bottom-left.
@@ -209,7 +218,7 @@ private fun FillTile(size: TileSize, g: Gauge, chrome: Boolean) {
         Box(Modifier.fillMaxHeight().width(fillW).clip(RoundedCornerShape(Myty.Radius)).background(accent))
         val split = with(androidx.compose.ui.platform.LocalDensity.current) { fillW.toPx() }
         // Same size on every tile width (it's set by one column), so tiles read alike side by side.
-        val big = minOf(maxWidth.value / size.w * 0.25f, maxHeight.value * 0.55f)
+        val big = minOf(maxWidth.value / size.w * 0.25f, maxHeight.value * 0.42f)
         TwoTone(split) { inside ->
             Box(Modifier.fillMaxSize()) {
                 Value(g.value, big, color = if (inside) on else accent, modifier = Modifier.align(Alignment.Center))
@@ -241,43 +250,68 @@ private fun OrbitTile(size: TileSize, g: Gauge, chrome: Boolean) {
 
 // ---- Style 4: dot grid ---------------------------------------------------------------------------
 
+/**
+ * Dots fill up as the value rises. A column on the left is kept clear for the label and reading, and the
+ * dots are spaced evenly over the rest, however big the tile is. While the corner buttons show, the
+ * label and reading make way for them and the dots under the right-hand buttons are dropped.
+ */
 @Composable
 private fun DotsTile(size: TileSize, g: Gauge, chrome: Boolean) {
     val accent = LocalAccent.current
     val f by animateFloatAsState(g.fraction, springy, label = "dots")
+    val hidden by animateFloatAsState(if (chrome) 0f else 1f, tween(200), label = "dotsUnderButtons")
+    val measurer = rememberTextMeasurer()
+    val fs = labelSize(size)
     BoxWithConstraints(Modifier.fillMaxSize().padding(pad(size))) {
-        // Dot size follows the tile's height, as in the mockups: about 9 rows on large, 4 on wide, 7 on small.
-        val targetRows = when (size) {
+        val density = LocalDensity.current
+        val style = TextStyle(fontFamily = Myty.Font, fontSize = fs)
+        val textW = with(density) {
+            maxOf(measurer.measure(g.label, style).size.width, measurer.measure(g.value, style).size.width).toDp()
+        }
+        // Wide enough for the text, or for a corner button when the tile is selected.
+        val info = maxOf(textW, buttonSize(size) - (pad(size) - buttonPad(size))) + 8.dp
+        val rows = when (size) {
             TileSize.Large -> 9
             TileSize.Wide -> 4
-            TileSize.Small -> 7
+            TileSize.Small -> 8
             TileSize.Tiny -> 3
         }
-        val pitch = maxHeight / targetRows
-        val cols = floor(maxWidth / pitch).toInt().coerceAtLeast(1)
-        val rows = targetRows
-        // The label takes the first cell, the reading the start of the last row.
-        val valueCells = if (g.value.length > 3) 2 else 1
-        val skip = setOf(0) + (0 until valueCells).map { (rows - 1) * cols + it }
-        val total = rows * cols - skip.size
+        val areaW = maxWidth - info
+        val pitchY = maxHeight / rows
+        val cols = (areaW / pitchY).roundToInt().coerceAtLeast(1)
+        val pitchX = areaW / cols
         Canvas(Modifier.fillMaxSize()) {
-            val p = pitch.toPx()
-            val r = p * 0.36f
+            val px = pitchX.toPx()
+            val py = pitchY.toPx()
+            val x0 = info.toPx()
+            val r = minOf(px, py) * 0.37f
+            // Right-hand buttons, in this box's coordinates (it's inset by the tile padding).
+            val bs = buttonSize(size).toPx()
+            val inset = (pad(size) - buttonPad(size)).toPx()
+            val margin = 2.dp.toPx()
+            val w = this.size.width
+            val h = this.size.height
+            val buttons = listOf(
+                Rect(w + inset - bs, -inset, w + inset, -inset + bs),
+                Rect(w + inset - bs, h + inset - bs, w + inset, h + inset),
+            ).map { it.inflate(margin) }
+            val total = rows * cols
             val filled = Math.round(f * total)
-            var n = 0
-            val left = (this.size.width - cols * p) / 2
-            for (i in 0 until rows * cols) {
-                if (i in skip) continue
-                val c = center.copy(x = left + (i % cols) * p + p / 2, y = (i / cols) * p + p / 2)
-                if (n < filled) drawCircle(accent, r, c) else drawCircle(Myty.White, r - 0.6.dp.toPx(), c, style = Stroke(1.dp.toPx()))
-                n++
+            for (i in 0 until total) {
+                val c = Offset(x0 + (i % cols) * px + px / 2, (i / cols) * py + py / 2)
+                val dot = Rect(c, r)
+                val alpha = if (buttons.any { it.overlaps(dot) }) 1f - hidden else 1f
+                if (alpha <= 0f) continue
+                if (i < filled) drawCircle(accent, r, c, alpha = alpha)
+                else drawCircle(Myty.White, r - 0.6.dp.toPx(), c, alpha = alpha, style = Stroke(1.dp.toPx()))
             }
         }
-        val fs = labelSize(size)
         AnimatedVisibility(chrome, Modifier.align(Alignment.TopStart), enter = fadeIn(), exit = fadeOut()) {
             Text(g.label, fontSize = fs)
         }
-        Value(g.value, fs.value, modifier = Modifier.align(Alignment.BottomStart))
+        AnimatedVisibility(chrome, Modifier.align(Alignment.BottomStart), enter = fadeIn(), exit = fadeOut()) {
+            Value(g.value, fs.value)
+        }
     }
 }
 
