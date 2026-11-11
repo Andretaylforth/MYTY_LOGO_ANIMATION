@@ -1,0 +1,162 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#222}</style></head><body>
+<script type="module">
+// Offline plate renderer: a static desk scene, accumulated over many jittered
+// light samples (soft window light + sky dome), written out as a JPEG.
+// Units are metres; the desk top is y = 0 and the product spot is the origin.
+import * as THREE from "https://esm.sh/three@0.160.0?bundle"
+const q = new URLSearchParams(location.search)
+const ENV = q.get("env") || "1", VIEW = q.get("view") || "A", SPP = +(q.get("spp") || 96)
+const W = +(q.get("w") || 2400), H = +(q.get("h") || 1600)
+
+const ENVS = {
+  // 01: white desk, pale wall, soft cool daylight from a window on the left
+  "1": { wall: 0xdcdad5, desk: 0xf1efea, deskRough: 0.55, mat: 0xc9b79c, cab: 0xa9a59c, accent: 0xe8743b, metal: 0xb9bcc0,
+         key: { color: 0xfff1dc, power: 5.2, win: { x: -2.3, y0: 0.55, y1: 1.9, z0: -0.1, z1: 1.5 } },
+         sky: { color: 0xcfdcf2, power: 1.25 }, amb: 0.2, floor: 0x8d7f6c, exposure: 1.0, lamp: false,
+         cams: { A: { pos: [0.72, 0.52, 1.78], tgt: [0.06, 0.2, -0.1], fov: 32 }, B: { pos: [-1.05, 0.34, 1.35], tgt: [0.02, 0.2, -0.1], fov: 36 } } },
+  // 02: evening: dark green wall, grey desk, warm desk lamp on the right, dim cool ambient
+  "2": { wall: 0x1f4a47, desk: 0xd4d6d6, deskRough: 0.5, mat: 0x2a3550, cab: 0x8e9496, accent: 0x2a4fb0, metal: 0xaab0b6,
+         key: { color: 0xffd7a3, power: 4.4, lampPos: [0.5, 0.52, -0.12], lampR: 0.07 },
+         sky: { color: 0xa9c4e8, power: 0.5 }, amb: 0.08, floor: 0x3a4044, exposure: 1.15, lamp: true,
+         cams: { A: { pos: [-0.62, 0.5, 1.8], tgt: [0.04, 0.2, -0.1], fov: 32 }, B: { pos: [1.0, 0.3, 1.4], tgt: [-0.05, 0.2, -0.1], fov: 36 } } },
+  // 03: walnut desk, warm plaster wall, low afternoon sun from the right
+  "3": { wall: 0xd9cdb9, desk: 0x5e4634, deskRough: 0.38, mat: 0xe6e0d2, cab: 0x7c5a43, accent: 0xc0392b, metal: 0xc7c2b8,
+         key: { color: 0xffc98a, power: 6.0, win: { x: 2.3, y0: 0.35, y1: 1.3, z0: 0.2, z1: 1.7 } },
+         sky: { color: 0xbfd0ea, power: 0.9 }, amb: 0.16, floor: 0x5b4636, exposure: 1.05, lamp: false,
+         cams: { A: { pos: [-0.7, 0.46, 1.8], tgt: [0.04, 0.2, -0.1], fov: 32 }, B: { pos: [0.35, 0.95, 1.6], tgt: [0.02, 0.12, -0.05], fov: 34 } } },
+}
+const E = ENVS[ENV], CAM = E.cams[VIEW]
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true })
+renderer.setPixelRatio(1); renderer.setSize(W, H)
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace
+document.body.appendChild(renderer.domElement)
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000)
+const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 30)
+camera.position.set(...CAM.pos); camera.lookAt(...CAM.tgt)
+
+// deterministic rng
+let seed = 1234567; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
+const std = (color, roughness = 0.6, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness })
+const add = (geo, mat, x, y, z, ry = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.y = ry; m.castShadow = true; m.receiveShadow = true; scene.add(m); return m }
+const box = (w, h, d, mat, x, y, z, ry = 0) => add(new THREE.BoxGeometry(w, h, d), mat, x, y + h / 2, z, ry)
+const cyl = (r, h, mat, x, y, z, r2 = r) => add(new THREE.CylinderGeometry(r2, r, h, 48), mat, x, y + h / 2, z)
+
+// room
+const wallM = std(E.wall, 0.92)
+box(8, 4, 0.1, wallM, 0, -1, -0.47)
+box(10, 0.1, 8, std(E.floor, 0.8), 0, -0.84, 1.5)
+// skirting + a shallow pilaster and picture rail for some architecture
+box(8, 0.012, 0.02, std(E.wall, 0.8), 0, 1.02, -0.41)
+box(0.16, 4, 0.05, wallM, -1.05, -1, -0.44)
+// desk
+const deskM = std(E.desk, E.deskRough)
+box(1.9, 0.032, 0.84, deskM, 0, -0.032, 0)
+box(0.05, 0.72, 0.05, std(0xe8e6e1, 0.5), -0.9, -0.752, 0.37); box(0.05, 0.72, 0.05, std(0xe8e6e1, 0.5), 0.9, -0.752, 0.37)
+// cabinet wall on the right (grid of doors with a shadow gap + knobs)
+const cabM = std(E.cab, 0.7), knobM = std(E.metal, 0.3, 1)
+for (let i = 0; i < 4; i++) for (let j = 0; j < 6; j++) {
+  const x = 0.72 + i * 0.262, y = -0.78 + j * 0.332
+  box(0.254, 0.324, 0.05, cabM, x, y, -0.36)
+  const k = add(new THREE.CylinderGeometry(0.009, 0.009, 0.012, 20), knobM, x - 0.09, y + 0.27, -0.332); k.rotation.x = Math.PI / 2
+}
+box(1.07, 2.1, 0.3, std(E.cab, 0.8), 1.113, -0.8, -0.53)
+// shelf with books + framed print on the left
+box(0.62, 0.022, 0.17, std(0xd8c7a8, 0.6), -0.48, 0.6, -0.335)
+const bookC = [0x2f3b52, 0xe9e4d8, 0xb5533c, 0x8c8f8a, 0xd9c9a4, 0x34443c]
+for (let i = 0, x = -0.74; i < 9; i++) { const w = 0.018 + rnd() * 0.022, h = 0.15 + rnd() * 0.07; box(w, h, 0.12, std(bookC[i % 6], 0.75), x + w / 2, 0.622, -0.345); x += w + 0.002 }
+box(0.1, 0.07, 0.1, std(E.metal, 0.35, 0.9), -0.3, 0.622, -0.34)
+box(0.3, 0.4, 0.016, std(0x1c1c1c, 0.5), 0.22, 0.52, -0.412); box(0.26, 0.36, 0.004, std(0xf3efe6, 0.9), 0.22, 0.54, -0.402)
+box(0.12, 0.17, 0.003, std(E.accent, 0.8), 0.22, 0.635, -0.399)
+// desk mat, keyboard, mouse
+box(0.66, 0.003, 0.29, std(E.mat, 0.95), 0.36, 0, 0.2)
+const kb = new THREE.Group(); kb.position.set(0.3, 0.003, 0.2); kb.rotation.y = 0.04; scene.add(kb)
+const kbAdd = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y + h / 2, z); m.castShadow = m.receiveShadow = true; kb.add(m) }
+kbAdd(0.335, 0.016, 0.125, std(0xe9e6df, 0.5), 0, 0, 0)
+const capA = std(0xf4f2ec, 0.6), capB = std(0xa8a69f, 0.6), capC = std(E.accent, 0.55)
+for (let r = 0; r < 5; r++) for (let c = 0; c < 15; c++) {
+  if (r === 4 && c > 3 && c < 10) { if (c === 4) kbAdd(0.123, 0.009, 0.0185, capA, -0.154 + 6.5 * 0.0213 + 0.011, 0.016, -0.045 + r * 0.0225); continue }
+  const edge = c === 0 || c === 14 || r === 4
+  kbAdd(0.0185, 0.009, 0.0185, (r === 0 && c === 14) || (r === 0 && c === 0) ? capC : edge ? capB : capA, -0.154 + c * 0.0213 + 0.005, 0.016, -0.045 + r * 0.0225)
+}
+const mouse = add(new THREE.SphereGeometry(0.5, 40, 24), std(0xf2f0ea, 0.45), 0.6, 0.016, 0.22); mouse.scale.set(0.062, 0.034, 0.104)
+// mug, pen cup, notebook stack, metal box, small plant pot
+cyl(0.041, 0.092, std(0xeeeae2, 0.35), 0.72, 0, -0.12); cyl(0.036, 0.004, std(0x2a1a12, 0.2), 0.72, 0.086, -0.12)
+cyl(0.038, 0.1, std(E.cab, 0.6), 0.84, 0, -0.24)
+for (let i = 0; i < 5; i++) { const p = add(new THREE.CylinderGeometry(0.004, 0.004, 0.17, 10), std([0x1c1c1c, E.accent, 0xd9c9a4, 0x2f3b52, 0xf3efe6][i], 0.5), 0.84 + (rnd() - 0.5) * 0.04, 0.115, -0.24 + (rnd() - 0.5) * 0.04); p.rotation.set((rnd() - 0.5) * 0.35, 0, (rnd() - 0.5) * 0.35) }
+box(0.21, 0.012, 0.29, std(0xe9e4d8, 0.85), -0.66, 0, 0.16, 0.22); box(0.2, 0.01, 0.28, std(0x2f3b52, 0.8), -0.665, 0.012, 0.155, 0.12)
+const pen = add(new THREE.CylinderGeometry(0.004, 0.004, 0.14, 12), std(0x1c1c1c, 0.4), -0.6, 0.027, 0.16); pen.rotation.set(Math.PI / 2, 0, 0.5)
+box(0.2, 0.075, 0.15, std(E.metal, 0.38, 0.85), -0.62, 0, -0.2, -0.1)
+cyl(0.03, 0.02, std(0xe9e6df, 0.4), -0.62, 0.075, -0.2, 0.034)
+// desk lamp (always present as an object; only lit in the evening scene)
+const lampM = std(0xf1efea, 0.4)
+const LX = E.lamp ? E.key.lampPos[0] : -0.86, LZ = E.lamp ? E.key.lampPos[2] - 0.12 : -0.26
+cyl(0.075, 0.014, lampM, LX, 0, LZ); cyl(0.008, 0.5, lampM, LX, 0.014, LZ)
+const shade = add(new THREE.CylinderGeometry(0.05, 0.1, 0.13, 48, 1, true), new THREE.MeshStandardMaterial({ color: 0xf6f1e6, roughness: 0.7, side: THREE.DoubleSide, emissive: E.lamp ? 0xffd9a8 : 0x000000, emissiveIntensity: E.lamp ? 1.6 : 0 }), LX, 0.56, LZ + 0.06)
+shade.castShadow = !E.lamp
+
+// lights (re-aimed every sample)
+const keyC = new THREE.Color(E.key.color), skyC = new THREE.Color(E.sky.color)
+let key
+if (E.lamp) { key = new THREE.PointLight(keyC, 1, 6, 2); key.shadow.mapSize.set(1024, 1024); key.shadow.camera.near = 0.03; key.shadow.camera.far = 6; key.shadow.bias = -0.002 }
+else { key = new THREE.SpotLight(keyC, 1, 0, 0.5, 0.6, 0); key.shadow.mapSize.set(2048, 2048); key.shadow.camera.near = 0.5; key.shadow.camera.far = 8; key.shadow.bias = -0.0006; key.target.position.set(0, 0.1, 0); scene.add(key.target) }
+key.castShadow = true; scene.add(key)
+const sky = new THREE.DirectionalLight(skyC, 1); sky.castShadow = true; sky.shadow.mapSize.set(2048, 2048)
+Object.assign(sky.shadow.camera, { left: -2.2, right: 2.2, top: 2.2, bottom: -2.2, near: 0.1, far: 12 }); sky.shadow.bias = -0.0008; sky.shadow.normalBias = 0.004
+scene.add(sky, sky.target)
+scene.add(new THREE.HemisphereLight(skyC, new THREE.Color(E.desk).multiplyScalar(0.6), E.amb * 1.6))
+
+// accumulation
+const rtOpt = { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true }
+const frame = new THREE.WebGLRenderTarget(W, H, rtOpt), accum = new THREE.WebGLRenderTarget(W, H, { ...rtOpt, type: THREE.FloatType, depthBuffer: false })
+const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+const addMat = new THREE.ShaderMaterial({ blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true, uniforms: { t: { value: frame.texture } },
+  vertexShader: "varying vec2 v; void main(){ v = uv; gl_Position = vec4(position.xy, 0., 1.); }", fragmentShader: "uniform sampler2D t; varying vec2 v; void main(){ gl_FragColor = vec4(texture2D(t, v).rgb, 1.); }" })
+const outMat = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, uniforms: { t: { value: accum.texture }, k: { value: 1 }, ex: { value: E.exposure }, res: { value: new THREE.Vector2(W, H) } },
+  vertexShader: "varying vec2 v; void main(){ v = uv; gl_Position = vec4(position.xy, 0., 1.); }",
+  fragmentShader: `uniform sampler2D t; uniform float k; uniform float ex; uniform vec2 res; varying vec2 v;
+    float h(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+    vec3 film(vec3 x){ x *= ex; return (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14); }
+    void main(){ vec3 c = texture2D(t, v).rgb * k; vec2 d = v - .5; c *= 1. - dot(d, d) * .32;
+      c = film(c); c = mix(vec3(dot(c, vec3(.3,.59,.11))), c, 0.92); c = c * 0.965 + 0.012;
+      c = pow(clamp(c, 0., 1.), vec3(1. / 2.2)); c += (h(v * res) - .5) * 0.022; gl_FragColor = vec4(c, 1.); }` })
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), addMat), qScene = new THREE.Scene(); qScene.add(quad)
+renderer.autoClear = true
+renderer.setRenderTarget(accum); renderer.setClearColor(0, 1); renderer.clear()
+
+window.__done = false
+let i = 0
+function sample() {
+  // camera jitter (AA)
+  camera.setViewOffset(W, H, rnd() - 0.5, rnd() - 0.5, W, H)
+  if (E.lamp) {
+    const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * E.key.lampR
+    key.position.set(E.key.lampPos[0] + Math.cos(a) * r, E.key.lampPos[1] + (rnd() - 0.5) * 0.05, E.key.lampPos[2] + Math.sin(a) * r)
+    key.intensity = E.key.power
+  } else {
+    const w = E.key.win
+    key.position.set(w.x, w.y0 + rnd() * (w.y1 - w.y0), w.z0 + rnd() * (w.z1 - w.z0))
+    key.intensity = E.key.power * 1.9
+  }
+  // cosine-weighted sky dome sample
+  const u = rnd(), ph = rnd() * Math.PI * 2, st = Math.sqrt(u), ct = Math.sqrt(1 - u)
+  sky.position.set(Math.cos(ph) * st * 5, ct * 5 + 0.2, Math.sin(ph) * st * 5 + 1.2); sky.target.position.set(0, 0, 0.2)
+  sky.intensity = E.sky.power * 1.5
+  renderer.autoClear = true
+  renderer.setRenderTarget(frame); renderer.render(scene, camera)
+  renderer.autoClear = false; quad.material = addMat
+  renderer.setRenderTarget(accum); renderer.render(qScene, quadCam)
+  i++
+  if (i < SPP) { if (i % 4 === 0) setTimeout(sample, 0); else sample(); return }
+  renderer.autoClear = true; quad.material = outMat; outMat.uniforms.k.value = 1 / SPP
+  renderer.setRenderTarget(null); renderer.render(qScene, quadCam)
+  const small = document.createElement("canvas"); small.width = Math.round(W * 0.55); small.height = Math.round(H * 0.55)
+  const c2 = small.getContext("2d"); c2.imageSmoothingQuality = "high"; c2.drawImage(renderer.domElement, 0, 0, small.width, small.height)
+  window.__full = renderer.domElement.toDataURL("image/jpeg", 0.86); window.__small = small.toDataURL("image/jpeg", 0.82)
+  window.__info = { env: ENV, view: VIEW, W, H, cam: CAM }
+  window.__done = true
+}
+sample()
+</script></body></html>

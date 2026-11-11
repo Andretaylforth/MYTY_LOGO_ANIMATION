@@ -1,0 +1,321 @@
+// ── Desk mode: compositing engine ────────────────────────────────────────────
+// The case never moves: it stays at the origin exactly as in the normal
+// viewer, so placement, picking, outlines and every animation keep working
+// untouched. Instead the photo's camera, its lights and the shadow catcher are
+// expressed relative to the case (desk space -> model space), which is the
+// same picture as standing the case on the desk. Per frame this costs one
+// textured quad (the photo) + one textured plane (the shadow) on top of the
+// case itself; the shadow textures are only re-baked while something moves.
+const DESK_SHADOW_EXTENT = 1.15 // half-size of the baked shadow area, model units
+
+function deskImageSrc(view: DeskView): string {
+    if (typeof window === "undefined") return view.image.src
+    const px = Math.max(window.innerWidth, window.innerHeight) * Math.min(window.devicePixelRatio || 1, 2)
+    return px <= 1500 && view.image.srcSmall ? view.image.srcSmall : view.image.src
+}
+function deskResolveView(view: DeskView, portrait: boolean): DeskView {
+    return portrait && view.portrait ? ({ ...view, ...view.portrait, portrait: undefined } as DeskView) : view
+}
+// the lights of a view as a normal lighting preset (so the usual cross-fade code drives them)
+function deskPreset(base: EnvPreset, view: DeskView): EnvPreset {
+    const l = view.lighting
+    return { ...base, id: "desk", effect: "none", ambient: l.ambient, key: l.key, fill: l.fill, rim: l.rim, instant: true } as EnvPreset
+}
+function deskYaw(d: any): number { return ((d.view?.product.rotationY ?? 0) * Math.PI) / 180 + d.yaw }
+
+function deskEnsure(world: any): any {
+    if (world.desk) return world.desk
+    const { THREE } = world
+    const coarse = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches
+    const N = coarse ? 512 : 1024
+    const rt = (n: number, depth = false) => { const t = new THREE.WebGLRenderTarget(n, n, { depthBuffer: depth }); t.texture.generateMipmaps = false; return t }
+    const d: any = {
+        active: false, view: null, yaw: 0, dirtyUntil: 0, tick: 0, coarse, textures: new Map<string, any>(),
+        scene: new THREE.Scene(), tmp: new THREE.Vector3(), base: new THREE.Vector3(),
+        rawDir: rt(N, true), tight: rt(N), tmpA: rt(N), wide: rt(N / 2), tmpB: rt(N / 2), rawAO: rt(256, true), ao: rt(256), tmpC: rt(256),
+        bakeCam: new THREE.OrthographicCamera(-DESK_SHADOW_EXTENT, DESK_SHADOW_EXTENT, DESK_SHADOW_EXTENT, -DESK_SHADOW_EXTENT, 0.01, 100),
+        quadCam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadScene: new THREE.Scene(),
+    }
+    // the photograph, cropped to the viewer ("cover")
+    d.bgMat = new THREE.ShaderMaterial({
+        depthTest: false, depthWrite: false,
+        uniforms: { tMap: { value: null }, uCrop: { value: new THREE.Vector4(0, 0, 1, 1) } },
+        vertexShader: "uniform vec4 uCrop; varying vec2 vUv; void main(){ vUv = uCrop.xy + uv * uCrop.zw; gl_Position = vec4(position.xy, 1.0, 1.0); }",
+        fragmentShader: "uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <colorspace_fragment>\n}",
+    })
+    const bg = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), d.bgMat)
+    bg.frustumCulled = false; bg.renderOrder = -2
+    // shadow catcher: an invisible desk top that only shows the baked shadow
+    d.shadowMat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, depthTest: false,
+        uniforms: {
+            tTight: { value: d.tight.texture }, tWide: { value: d.wide.texture }, tAO: { value: d.ao.texture },
+            uColor: { value: new THREE.Color(0x000000) }, uOpacity: { value: 0.5 }, uContact: { value: 0.6 },
+        },
+        vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+        fragmentShader: [
+            "uniform sampler2D tTight; uniform sampler2D tWide; uniform sampler2D tAO; uniform vec3 uColor; uniform float uOpacity; uniform float uContact; varying vec2 vUv;",
+            "void main(){",
+            "  vec4 a = texture2D(tTight, vUv); vec4 b = texture2D(tWide, vUv);",
+            // r = how much is covered, g = covered * height of what covers it:
+            // near the case the shadow stays crisp, further up the caster it spreads
+            "  float h = b.g / max(b.r, 0.001);",
+            "  float s = mix(a.r, b.r, smoothstep(0.02, 0.45, h));",
+            "  float ao = texture2D(tAO, vUv).r;",
+            "  float al = 1.0 - (1.0 - uOpacity * s) * (1.0 - uContact * ao * ao);",
+            "  vec2 e = abs(vUv - 0.5) * 2.0; al *= 1.0 - smoothstep(0.82, 1.0, max(e.x, e.y));",
+            "  gl_FragColor = vec4(uColor, al);",
+            "  #include <colorspace_fragment>",
+            "}",
+        ].join("\n"),
+    })
+    d.plane = new THREE.Mesh(new THREE.PlaneGeometry(DESK_SHADOW_EXTENT * 2, DESK_SHADOW_EXTENT * 2), d.shadowMat)
+    d.plane.rotation.x = -Math.PI / 2; d.plane.renderOrder = -1; d.plane.frustumCulled = false
+    // calibration grid: 10 cm squares on the desk top, in desk space
+    d.frame = new THREE.Group()
+    const grid = new THREE.GridHelper(2, 20, 0xff3b30, 0x00c2ff)
+    grid.material.depthTest = false; grid.material.transparent = true; grid.material.opacity = 0.8
+    d.frame.add(grid, new THREE.AxesHelper(0.3)); d.frame.visible = false
+    d.scene.add(bg, d.plane, d.frame)
+    // flattens the case onto the desk along the light: r = covered, g = height of the caster
+    d.projMat = new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        uniforms: { uL: { value: new THREE.Vector3(0, -1, 0) }, uY0: { value: 0 }, uHMax: { value: 1 }, uAO: { value: 0 } },
+        vertexShader: [
+            "uniform vec3 uL; uniform float uY0; uniform float uHMax; varying float vH;",
+            "void main(){",
+            "  #ifdef USE_INSTANCING",
+            "    vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0);",
+            "  #else",
+            "    vec4 w = modelMatrix * vec4(position, 1.0);",
+            "  #endif",
+            "  float h = max(w.y - uY0, 0.0);",
+            "  vec3 p = w.xyz + uL * (h / max(-uL.y, 0.05));",
+            "  vH = clamp(h / uHMax, 0.0, 1.0);",
+            "  gl_Position = projectionMatrix * viewMatrix * vec4(p.x, uY0, p.z, 1.0);",
+            "  gl_Position.z = (vH * 1.98 - 0.99) * gl_Position.w;", // lowest caster wins
+            "}",
+        ].join("\n"),
+        fragmentShader: "uniform float uAO; varying float vH; void main(){ gl_FragColor = vec4(mix(1.0, 1.0 - vH, uAO), vH * (1.0 - uAO), 0.0, 1.0); }",
+    })
+    d.blurMat = new THREE.ShaderMaterial({
+        depthTest: false, depthWrite: false,
+        uniforms: { tMap: { value: null }, uStep: { value: new THREE.Vector2() } },
+        vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+        fragmentShader: [
+            "uniform sampler2D tMap; uniform vec2 uStep; varying vec2 vUv;",
+            "void main(){",
+            "  vec4 s = texture2D(tMap, vUv) * 0.1964825501511404;",
+            "  s += (texture2D(tMap, vUv + uStep * 1.411764705882353) + texture2D(tMap, vUv - uStep * 1.411764705882353)) * 0.2969069646728344;",
+            "  s += (texture2D(tMap, vUv + uStep * 3.2941176470588234) + texture2D(tMap, vUv - uStep * 3.2941176470588234)) * 0.09447039785044732;",
+            "  s += (texture2D(tMap, vUv + uStep * 5.176470588235294) + texture2D(tMap, vUv - uStep * 5.176470588235294)) * 0.010381362401148057;",
+            "  gl_FragColor = s;",
+            "}",
+        ].join("\n"),
+    })
+    d.quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), d.blurMat))
+    // light bounced off the wall and the desk top
+    d.bounce = new THREE.HemisphereLight(0xffffff, 0xffffff, 0)
+    world.scene.add(d.bounce)
+    world.desk = d
+    return d
+}
+
+function deskLoadTexture(world: any, src: string): Promise<any> {
+    const d = deskEnsure(world), { THREE } = world
+    const hit = d.textures.get(src)
+    if (hit) return Promise.resolve(hit)
+    return new Promise((resolve, reject) => {
+        const loader = new THREE.TextureLoader(); loader.setCrossOrigin("anonymous")
+        loader.load(src, (tex: any) => {
+            tex.colorSpace = THREE.SRGBColorSpace; tex.generateMipmaps = false
+            tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter
+            if (world.disposed) { tex.dispose(); reject(new Error("disposed")); return }
+            d.textures.set(src, tex); resolve(tex)
+        }, undefined, reject)
+    })
+}
+
+// Reflections for the aluminium parts: the photo itself wrapped round the
+// case, plus one bright panel where the key light is.
+function deskBuildEnv(world: any, tex: any): void {
+    const d = world.desk, { THREE, renderer } = world
+    if (!world.studioEnv && !d.envSaved) return // nothing metallic on the case yet
+    const envKey = tex.uuid + "|" + JSON.stringify(d.view.lighting.key)
+    if (d.envKey === envKey && world.studioEnv !== d.envSaved) return
+    d.envKey = envKey
+    const scene = new THREE.Scene()
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 16), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, color: new THREE.Color(1.5, 1.5, 1.5) }))
+    scene.add(dome)
+    const k = d.view.lighting.key
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), new THREE.MeshBasicMaterial({ color: new THREE.Color(k.color).multiplyScalar(1.6 * k.intensity), side: THREE.DoubleSide }))
+    panel.position.set(k.position[0], k.position[1], k.position[2]).normalize().multiplyScalar(4.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), -deskYaw(d))
+    panel.lookAt(0, 0, 0); scene.add(panel)
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    const env = pmrem.fromScene(scene, 0.04).texture
+    pmrem.dispose()
+    dome.geometry.dispose(); dome.material.dispose(); panel.geometry.dispose(); panel.material.dispose()
+    deskSwapEnv(world, env)
+}
+function deskSwapEnv(world: any, env: any): void {
+    const d = world.desk, old = world.studioEnv
+    if (!d.envSaved) d.envSaved = old
+    world.studioEnv = env
+    world.scene.traverse((c: any) => { if (c.isMesh && c.material && c.material.envMap === old && old) { c.material.envMap = env; c.material.needsUpdate = true } })
+    if (old && old !== d.envSaved && old !== env) old.dispose()
+}
+
+// Show a view whose photograph is already loaded.
+function deskApply(world: any, view: DeskView, tex: any): void {
+    const d = deskEnsure(world), { camera, controls } = world
+    if (!d.active) {
+        d.saved = { pos: camera.position.clone(), fov: camera.fov, enabled: controls.enabled }
+        controls.enabled = false
+        world.cameraAnim = null
+        d.active = true
+    }
+    if (!d.view || d.view.id !== view.id || d.view.image.src !== view.image.src) d.yaw = 0
+    d.view = view
+    d.bgMat.uniforms.tMap.value = tex
+    d.shadowMat.uniforms.uColor.value.set(view.shadow.color)
+    d.shadowMat.uniforms.uOpacity.value = view.shadow.opacity
+    d.shadowMat.uniforms.uContact.value = view.shadow.contact
+    const b = view.lighting.bounce
+    d.bounce.intensity = b ? b.intensity : 0
+    if (b) { d.bounce.color.set(b.sky); d.bounce.groundColor.set(b.ground) }
+    d.frame.visible = !!view.debugGrid
+    // keep only this photograph on the GPU
+    for (const [src, t] of d.textures) if (t !== tex) { t.dispose(); d.textures.delete(src) }
+    deskBuildEnv(world, tex)
+    d.dirtyUntil = performance.now() + 1500
+}
+
+function deskExit(world: any): void {
+    const d = world.desk; if (!d || !d.active) return
+    const { camera, controls, renderer } = world
+    d.active = false
+    camera.clearViewOffset()
+    camera.up.set(0, 1, 0)
+    camera.fov = d.saved.fov; camera.position.copy(d.saved.pos); camera.lookAt(0, 0, 0)
+    const el = renderer.domElement, aspect = (el.clientWidth || 1) / (el.clientHeight || 1)
+    camera.aspect = aspect; camera.zoom = fitZoom(aspect); camera.updateProjectionMatrix()
+    controls.enabled = d.saved.enabled
+    world.lightRig.rotation.y = 0
+    d.bounce.intensity = 0
+    if (d.envSaved) { deskSwapEnv(world, d.envSaved); d.envSaved = null }
+    d.envKey = null
+    for (const [, t] of d.textures) t.dispose()
+    d.textures.clear(); d.bgMat.uniforms.tMap.value = null; d.view = null
+}
+
+// Every frame: put the camera where the photographer stood (relative to the
+// case) and crop its frustum exactly like the photo is cropped.
+function deskCamera(world: any): void {
+    const d = world.desk, v: DeskView = d.view, box = world.caseBox
+    if (!v || !box) return
+    const { camera, renderer } = world
+    const m = world.rootScale / (v.product.scale || 1) // model units per metre
+    const yaw = deskYaw(d), cos = Math.cos(yaw), sin = Math.sin(yaw)
+    const bx = (box.min.x + box.max.x) / 2, bz = (box.min.z + box.max.z) / 2
+    const toModel = (p: DeskV3, out: any) => {
+        const x = p[0] - v.product.position[0], z = p[2] - v.product.position[1]
+        return out.set((x * cos - z * sin) * m + bx, p[1] * m + box.min.y, (x * sin + z * cos) * m + bz)
+    }
+    d.base.set(bx, box.min.y, bz)
+    toModel(v.camera.position, camera.position)
+    camera.up.set(0, 1, 0)
+    camera.lookAt(toModel(v.camera.target, d.tmp))
+    if (v.camera.roll) camera.rotateZ((v.camera.roll * Math.PI) / 180)
+    const el = renderer.domElement, cw = el.clientWidth || 1, ch = el.clientHeight || 1
+    const W = v.image.width, H = v.image.height, av = cw / ch
+    let w = W, h = H
+    if (av >= W / H) h = W / av; else w = H * av
+    const z = Math.max(1, (cw < 760 ? v.framing?.narrowZoom ?? v.framing?.zoom : v.framing?.zoom) ?? 1)
+    w /= z; h /= z
+    const f = v.framing?.focus ?? [0.5, 0.5]
+    const x = Math.min(Math.max(f[0] * W - w / 2, 0), W - w), y = Math.min(Math.max(f[1] * H - h / 2, 0), H - h)
+    camera.fov = v.camera.fov; camera.zoom = 1
+    camera.setViewOffset(W, H, x, y, w, h)
+    d.bgMat.uniforms.uCrop.value.set(x / W, 1 - (y + h) / H, w / W, h / H)
+    world.lightRig.rotation.y = -yaw
+    if (d.frame.visible) { toModel([0, 0, 0], d.frame.position); d.frame.rotation.y = -yaw; d.frame.scale.setScalar(m) }
+}
+
+// Bake the shadow textures: the case flattened onto the desk along the key
+// light (cast shadow) and straight down (contact shadow), then blurred.
+function deskBake(world: any): void {
+    const d = world.desk, v: DeskView = d.view, box = world.caseBox
+    if (!v || !box) return
+    const { THREE, renderer, scene } = world
+    const E = DESK_SHADOW_EXTENT, y0 = box.min.y
+    const src = v.shadow.direction ?? v.lighting.key.position
+    const L = new THREE.Vector3(-src[0], -src[1], -src[2]).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -deskYaw(d))
+    if (-L.y < 0.32) { const hl = Math.hypot(L.x, L.z) || 1, s = Math.sqrt(1 - 0.32 * 0.32) / hl; L.set(L.x * s, -0.32, L.z * s) } // cap the shadow's length
+    const hl = Math.hypot(L.x, L.z)
+    // slide the baked area towards where the shadow falls
+    const cx = d.base.x + (hl > 1e-4 ? (L.x / hl) * E * 0.42 * Math.min(1, hl / 0.6) : 0)
+    const cz = d.base.z + (hl > 1e-4 ? (L.z / hl) * E * 0.42 * Math.min(1, hl / 0.6) : 0)
+    d.plane.position.set(cx, y0, cz)
+    const cam = d.bakeCam
+    cam.position.set(cx, y0 + 10, cz); cam.up.set(0, 0, -1); cam.lookAt(cx, y0, cz); cam.updateMatrixWorld(true)
+    const hidden: any[] = []
+    scene.traverse((o: any) => {
+        if (o.visible && (o === world.sky || o === world.floor || o === world.ghostObject || o.isSprite || o.isPoints || o.isLine || o.isInstancedMesh)) { o.visible = false; hidden.push(o) }
+    })
+    const bg = scene.background, ov = scene.overrideMaterial, ac = renderer.autoClear
+    const clear = renderer.getClearColor(new THREE.Color()), clearA = renderer.getClearAlpha()
+    scene.background = null; scene.overrideMaterial = d.projMat
+    renderer.autoClear = true; renderer.setClearColor(0x000000, 0)
+    const u = d.projMat.uniforms
+    u.uY0.value = y0
+    u.uL.value.copy(L); u.uHMax.value = Math.max(0.2, box.max.y - y0) * 1.15; u.uAO.value = 0
+    renderer.setRenderTarget(d.rawDir); renderer.render(scene, cam)
+    u.uL.value.set(0, -1, 0); u.uHMax.value = 0.075; u.uAO.value = 1
+    renderer.setRenderTarget(d.rawAO); renderer.render(scene, cam)
+    scene.overrideMaterial = ov; scene.background = bg
+    for (const o of hidden) o.visible = true
+    const blur = (from: any, to: any, sx: number, sy: number) => {
+        d.blurMat.uniforms.tMap.value = from.texture
+        d.blurMat.uniforms.uStep.value.set(sx / to.width, sy / to.height)
+        renderer.setRenderTarget(to); renderer.render(d.quadScene, d.quadCam)
+    }
+    const s = Math.max(0.15, v.shadow.softness)
+    blur(d.rawDir, d.tmpA, 0.7 * s, 0); blur(d.tmpA, d.tight, 0, 0.7 * s)
+    blur(d.rawDir, d.tmpB, 1.6 * s, 0); blur(d.tmpB, d.wide, 0, 1.6 * s)
+    blur(d.wide, d.tmpB, 3.4 * s, 0); blur(d.tmpB, d.wide, 0, 3.4 * s)
+    blur(d.wide, d.tmpB, 5.2 * s, 0); blur(d.tmpB, d.wide, 0, 5.2 * s)
+    blur(d.rawAO, d.tmpC, 1.3, 0); blur(d.tmpC, d.ao, 0, 1.3)
+    blur(d.ao, d.tmpC, 2.2, 0); blur(d.tmpC, d.ao, 0, 2.2)
+    renderer.setRenderTarget(null)
+    renderer.setClearColor(clear, clearA); renderer.autoClear = ac
+}
+
+function deskRender(world: any): void {
+    const d = world.desk, { renderer, scene, camera } = world
+    deskCamera(world) // also here: a resize redraws outside the animation loop
+    const moving = performance.now() < d.dirtyUntil || (world.seqTasks && world.seqTasks.length > 0) || world.wobbleAnims.size > 0 || world.spawnAnims.size > 0
+        || world.despawnAnims.size > 0 || world.screenholderAnims.size > 0 || world.screenRevealAnims.size > 0
+    d.tick++
+    if (moving) { d.settle = 2; if (!d.coarse || d.tick % 2 === 0) deskBake(world) }
+    else if (d.settle > 0) { d.settle--; deskBake(world) } // one last bake once everything has come to rest
+    const ac = renderer.autoClear, bg = scene.background, skyVis = world.sky.visible
+    renderer.autoClear = false
+    renderer.setRenderTarget(null); renderer.clear()
+    renderer.render(d.scene, camera)
+    renderer.clearDepth()
+    scene.background = null; world.sky.visible = false
+    renderer.render(scene, camera)
+    scene.background = bg; world.sky.visible = skyVis
+    renderer.autoClear = ac
+}
+
+function deskDispose(world: any): void {
+    const d = world.desk; if (!d) return
+    for (const k of ["rawDir", "tight", "tmpA", "wide", "tmpB", "rawAO", "ao", "tmpC"]) d[k]?.dispose()
+    for (const [, t] of d.textures) t.dispose()
+    d.bgMat.dispose(); d.shadowMat.dispose(); d.projMat.dispose(); d.blurMat.dispose()
+    d.scene.traverse((c: any) => { c.geometry?.dispose?.() })
+    if (d.envSaved && world.studioEnv && world.studioEnv !== d.envSaved) d.envSaved.dispose()
+    world.desk = null
+}
+
