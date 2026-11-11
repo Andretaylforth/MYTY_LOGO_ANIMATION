@@ -130,6 +130,8 @@ op('powerbutton_holder: "#3d3d3d", powerbutton_button: "#ff0000",', 'powerbutton
 op('    if (isSidePanelPartName(name)) return "#2e7d32"\n', '    if (isSidePanelPartName(name)) return "#c9c9c9"\n')
 op('const DEFAULT_PUCK_COLOR = "#ff0000" // red standard swatch', 'const DEFAULT_PUCK_COLOR = "#0a0192" // MYTY blue')
 
+op('const SCREENHOLDER_PLASTIC_COLOR = "#3d3d3d"', 'const SCREENHOLDER_PLASTIC_COLOR = "#c9c9c9"')
+
 s = base
 for find, repl, count in ops:
     n = s.count(find)
