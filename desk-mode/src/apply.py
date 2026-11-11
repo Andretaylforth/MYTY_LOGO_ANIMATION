@@ -123,6 +123,13 @@ op('{(showStartHint || awaitingTap || (envLabel && !awaitingTap)) && (', '{((sho
 
 import os
 if os.environ.get('DEBUGHOOK'): A('            worldRef.current = world\n', '            ;(window as any).__w = world\n')
+# standard colours: light grey side covers, dark grey structure, MYTY blue pucks and power button
+op('    corners: "#f5f5f5", frame: "#3d3d3d", motherboard_bracket: "#2e7d32", "variousparts_1.003": "#2e7d32", variousparts_1003: "#2e7d32",\n    ssd_holder: "#2e7d32",',
+   '    corners: "#3d3d3d", frame: "#3d3d3d", motherboard_bracket: "#3d3d3d", "variousparts_1.003": "#3d3d3d", variousparts_1003: "#3d3d3d",\n    ssd_holder: "#3d3d3d",')
+op('powerbutton_holder: "#3d3d3d", powerbutton_button: "#ff0000",', 'powerbutton_holder: "#3d3d3d", powerbutton_button: "#0a0192",')
+op('    if (isSidePanelPartName(name)) return "#2e7d32"\n', '    if (isSidePanelPartName(name)) return "#c9c9c9"\n')
+op('const DEFAULT_PUCK_COLOR = "#ff0000" // red standard swatch', 'const DEFAULT_PUCK_COLOR = "#0a0192" // MYTY blue')
+
 s = base
 for find, repl, count in ops:
     n = s.count(find)
