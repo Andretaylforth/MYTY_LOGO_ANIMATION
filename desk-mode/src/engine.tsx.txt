@@ -31,8 +31,8 @@ function deskEnsure(world: any): any {
     const rt = (n: number, depth = false) => { const t = new THREE.WebGLRenderTarget(n, n, { depthBuffer: depth }); t.texture.generateMipmaps = false; return t }
     const d: any = {
         active: false, view: null, yaw: 0, dirtyUntil: 0, tick: 0, coarse, textures: new Map<string, any>(),
-        scene: new THREE.Scene(), tmp: new THREE.Vector3(), base: new THREE.Vector3(),
-        rawDir: rt(N, true), tight: rt(N), tmpA: rt(N), wide: rt(N / 2), tmpB: rt(N / 2), rawAO: rt(256, true), ao: rt(256), tmpC: rt(256),
+        scene: new THREE.Scene(), tmp: new THREE.Vector3(), base: new THREE.Vector3(), tmpColor: new THREE.Color(),
+        rawDir: rt(N, true), tight: rt(N), tmpA: rt(N), wide: rt(N / 2), tmpB: rt(N / 2), rawAO: rt(256, true), ao: rt(256), tmpC: rt(256), glow: rt(256),
         bakeCam: new THREE.OrthographicCamera(-DESK_SHADOW_EXTENT, DESK_SHADOW_EXTENT, DESK_SHADOW_EXTENT, -DESK_SHADOW_EXTENT, 0.01, 100),
         quadCam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadScene: new THREE.Scene(),
     }
@@ -71,12 +71,30 @@ function deskEnsure(world: any): any {
     })
     d.plane = new THREE.Mesh(new THREE.PlaneGeometry(DESK_SHADOW_EXTENT * 2, DESK_SHADOW_EXTENT * 2), d.shadowMat)
     d.plane.rotation.x = -Math.PI / 2; d.plane.renderOrder = -1; d.plane.frustumCulled = false
+    // light the case throws back onto the desk: a soft halo of its own colour round its foot
+    d.glowMat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, depthTest: false,
+        uniforms: { tGlow: { value: d.glow.texture }, tAO: { value: d.ao.texture }, tWide: { value: d.wide.texture }, uTint: { value: new THREE.Color(0x888888) }, uStrength: { value: 0 } },
+        vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+        fragmentShader: [
+            "uniform sampler2D tGlow; uniform sampler2D tAO; uniform sampler2D tWide; uniform vec3 uTint; uniform float uStrength; varying vec2 vUv;",
+            "void main(){",
+            "  float g = smoothstep(0.0, 0.55, texture2D(tGlow, vUv).r);",
+            "  float lit = 1.0 - 0.85 * texture2D(tWide, vUv).r;", // none where the desk is in the case's shadow
+            "  float al = uStrength * g * lit * (1.0 - 0.6 * texture2D(tAO, vUv).r);",
+            "  gl_FragColor = vec4(uTint, al);",
+            "  #include <colorspace_fragment>",
+            "}",
+        ].join("\n"),
+    })
+    d.glowPlane = new THREE.Mesh(d.plane.geometry, d.glowMat)
+    d.glowPlane.rotation.x = -Math.PI / 2; d.glowPlane.renderOrder = -0.5; d.glowPlane.frustumCulled = false
     // calibration grid: 10 cm squares on the desk top, in desk space
     d.frame = new THREE.Group()
     const grid = new THREE.GridHelper(2, 20, 0xff3b30, 0x00c2ff)
     grid.material.depthTest = false; grid.material.transparent = true; grid.material.opacity = 0.8
     d.frame.add(grid, new THREE.AxesHelper(0.3)); d.frame.visible = false
-    d.scene.add(bg, d.plane, d.frame)
+    d.scene.add(bg, d.plane, d.glowPlane, d.frame)
     // flattens the case onto the desk along the light: r = covered, g = height of the caster
     d.projMat = new THREE.ShaderMaterial({
         side: THREE.DoubleSide,
@@ -180,6 +198,8 @@ function deskApply(world: any, view: DeskView, tex: any): void {
     d.shadowMat.uniforms.uColor.value.set(view.shadow.color)
     d.shadowMat.uniforms.uOpacity.value = view.shadow.opacity
     d.shadowMat.uniforms.uContact.value = view.shadow.contact
+    d.glowMat.uniforms.uStrength.value = view.shadow.glow ?? 0
+    d.glowPlane.visible = (view.shadow.glow ?? 0) > 0
     const b = view.lighting.bounce
     d.bounce.intensity = b ? b.intensity : 0
     if (b) { d.bounce.color.set(b.sky); d.bounce.groundColor.set(b.ground) }
@@ -255,7 +275,7 @@ function deskBake(world: any): void {
     // slide the baked area towards where the shadow falls
     const cx = d.base.x + (hl > 1e-4 ? (L.x / hl) * E * 0.42 * Math.min(1, hl / 0.6) : 0)
     const cz = d.base.z + (hl > 1e-4 ? (L.z / hl) * E * 0.42 * Math.min(1, hl / 0.6) : 0)
-    d.plane.position.set(cx, y0, cz)
+    d.plane.position.set(cx, y0, cz); d.glowPlane.position.set(cx, y0, cz)
     const cam = d.bakeCam
     cam.position.set(cx, y0 + 10, cz); cam.up.set(0, 0, -1); cam.lookAt(cx, y0, cz); cam.updateMatrixWorld(true)
     const hidden: any[] = []
@@ -286,6 +306,17 @@ function deskBake(world: any): void {
     blur(d.wide, d.tmpB, 5.2 * s, 0); blur(d.tmpB, d.wide, 0, 5.2 * s)
     blur(d.rawAO, d.tmpC, 1.3, 0); blur(d.tmpC, d.ao, 0, 1.3)
     blur(d.ao, d.tmpC, 2.2, 0); blur(d.tmpC, d.ao, 0, 2.2)
+    if (d.glowPlane.visible) {
+        blur(d.ao, d.tmpC, 4.5, 0); blur(d.tmpC, d.glow, 0, 4.5)
+        blur(d.glow, d.tmpC, 8, 0); blur(d.tmpC, d.glow, 0, 8)
+        // its colour: the big side covers, as lit by the key light
+        const tint = d.glowMat.uniforms.uTint.value.set(0x000000); let n = 0
+        for (const name of ["sidecover_front", "sidecover_back"]) for (const mesh of world.meshesByPart?.get(name) || []) if (mesh.material?.color) { tint.add(mesh.material.color); n++ }
+        if (n) tint.multiplyScalar(1 / n); else tint.set(0x888888)
+        const peak = Math.max(tint.r, tint.g, tint.b)
+        if (peak > 0.02) tint.multiplyScalar(0.85 / peak) // reflected light, not paint: keep the hue, lift the level
+        tint.multiply(d.tmpColor.set(v.lighting.key.color))
+    }
     renderer.setRenderTarget(null)
     renderer.setClearColor(clear, clearA); renderer.autoClear = ac
 }
@@ -311,9 +342,9 @@ function deskRender(world: any): void {
 
 function deskDispose(world: any): void {
     const d = world.desk; if (!d) return
-    for (const k of ["rawDir", "tight", "tmpA", "wide", "tmpB", "rawAO", "ao", "tmpC"]) d[k]?.dispose()
+    for (const k of ["rawDir", "tight", "tmpA", "wide", "tmpB", "rawAO", "ao", "tmpC", "glow"]) d[k]?.dispose()
     for (const [, t] of d.textures) t.dispose()
-    d.bgMat.dispose(); d.shadowMat.dispose(); d.projMat.dispose(); d.blurMat.dispose()
+    d.bgMat.dispose(); d.shadowMat.dispose(); d.glowMat.dispose(); d.projMat.dispose(); d.blurMat.dispose()
     d.scene.traverse((c: any) => { c.geometry?.dispose?.() })
     if (d.envSaved && world.studioEnv && world.studioEnv !== d.envSaved) d.envSaved.dispose()
     world.desk = null

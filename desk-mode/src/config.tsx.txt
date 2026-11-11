@@ -25,7 +25,8 @@ interface DeskView {
     }
     // shadow catcher: colour + strength of the cast shadow, how soft it gets away from the case,
     // strength of the contact shadow under it. direction overrides the key light's.
-    shadow: { color: number; opacity: number; softness: number; contact: number; direction?: DeskV3 }
+    // glow = how much of its own colour the case throws back onto the desk round its foot (0 = none).
+    shadow: { color: number; opacity: number; softness: number; contact: number; direction?: DeskV3; glow?: number }
     portrait?: Partial<DeskView> // overrides for tall (phone) viewers, e.g. a separate portrait photograph
     debugGrid?: boolean
 }
@@ -34,7 +35,7 @@ interface DeskEnvironment { id: string; name: string; views: DeskView[] }
 // The photographs (hosted project assets). Swap a URL here to replace a plate;
 // "-s" is the same image at roughly half size, for phones.
 const DESK_PLATE_URLS: Record<string, string> = __DESK_PLATE_URLS__
-const deskPlate = (name: string) => ({ src: DESK_PLATE_URLS[name], srcSmall: DESK_PLATE_URLS[name + "-s"], width: 2400, height: 1600 })
+const deskPlate = (name: string, width = 2400, height = 1600) => ({ src: DESK_PLATE_URLS[name], srcSmall: DESK_PLATE_URLS[name + "-s"], width, height })
 const DESK_LIGHT_01 = {
     ambient: { color: 0xe9edf4, intensity: 0.8 },
     key: { color: 0xfff1dc, intensity: 2.3, position: [-2.3, 1.2, 0.7] as DeskV3 },
@@ -92,6 +93,22 @@ const DESK_ENVIRONMENTS: DeskEnvironment[] = [
           product: { position: [-0.08, -0.06], rotationY: 16, scale: 1 },
           framing: { focus: [0.5, 0.52], narrowZoom: 1 },
           lighting: DESK_LIGHT_03, shadow: { color: 0x1a0f08, opacity: 0.62, softness: 0.95, contact: 0.7, direction: [2.0, 1.5, 0.9] } },
+    ] },
+    // Night desk: one lamp from behind-left of the case, very long lens. The camera was solved from the
+    // reference render of the case on this desk; the case stands at the origin of this view's desk space.
+    { id: "04", name: "Environment 04", views: [
+        { id: "A", label: "View A", image: deskPlate("env04a", 2000, 1333),
+          camera: { position: [-3.2966, 1.5398, 5.77], target: [-1.0318, 0.6011, 1.81], fov: 9.11 },
+          product: { position: [0, 0], rotationY: 0, scale: 1 },
+          framing: { focus: [0.5, 0.5] },
+          lighting: {
+              ambient: { color: 0xa9b6cc, intensity: 0.32 },
+              key: { color: 0xfff0dc, intensity: 3.2, position: [0.1, 1.0, -0.75] },
+              fill: { color: 0xc4d0e6, intensity: 0.42, position: [-0.5, 0.45, 0.85] },
+              rim: { color: 0xfff0dc, intensity: 0.5, position: [-1.2, 0.8, -0.4] },
+              bounce: { sky: 0x39424f, ground: 0xf2e8d8, intensity: 0.8 },
+          },
+          shadow: { color: 0x07090d, opacity: 0.82, softness: 0.3, contact: 0.8, direction: [0.1, 1.0, -0.75], glow: 0.5 } },
     ] },
 ]
 

@@ -1,6 +1,6 @@
 import sys, json
 base = open('ProductConfigurator.orig.tsx').read()
-names = [e + v + t for e in ('env01','env02','env03') for v in 'ab' for t in ('', '-s')]
+names = [e + v + t for e in ('env01','env02','env03') for v in 'ab' for t in ('', '-s')] + ['env04a', 'env04a-s']
 urls = json.load(open(sys.argv[1])) if len(sys.argv) > 1 else {n: '/plates/' + n + '.jpg' for n in names}
 plates = '{\n' + ''.join('    "%s": "%s",\n' % (n, urls[n]) for n in names) + '}'
 R = lambda n: open('desk/' + n).read()
@@ -64,7 +64,7 @@ B('    useEffect(() => {\n        if (!resetViewKey) return\n', '''    // Desk m
     useEffect(() => {
         const d = worldRef.current?.desk
         if (d) d.dirtyUntil = performance.now() + 1500
-    }, [placedParts, adjusting, isolateUid, csKey, colourSel?.isolate, placementMode])
+    }, [placedParts, adjusting, isolateUid, csKey, colourSel?.isolate, placementMode, partColors])
 
 ''')
 B('// Lighting: a small sun -- cycles the lighting scenes.\nfunction LightIcon() {', R('ui.txt'))
