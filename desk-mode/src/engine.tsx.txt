@@ -7,6 +7,7 @@
 // textured quad (the photo) + a few flat shadow catchers on top of the case
 // itself; the shadow textures are only re-baked while something moves.
 const DESK_SHADOW_EXTENT = 1.15 // half-size of the baked shadow area, model units
+const DESK_GRAIN = 0.22 // film grain over the whole picture when a view doesn't set its own (0 = off)
 
 function deskImageSrc(view: DeskView): string {
     if (typeof window === "undefined") return view.image.src
@@ -142,6 +143,45 @@ function deskEnsure(world: any): any {
         ].join("\n"),
     })
     d.quadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), d.blurMat))
+    // Film grain over photo + case together, so they read as one exposure. Not
+    // an overlay: the finished frame is copied once and re-developed -- grain
+    // is noise in the *exposure* (multiplied in linear light), strongest in the
+    // mid-tones, nearly gone in clear highlights, with a little base fog in the
+    // blacks; it comes from a small pre-blurred tile (soft clumps, mostly
+    // luminance, a trace of colour) that jumps 24 times a second like frames.
+    const gN = 256, gData = new Uint8Array(gN * gN * 4), gRaw = new Float32Array(gN * gN * 3)
+    for (let i = 0; i < gRaw.length; i++) gRaw[i] = (Math.random() + Math.random() + Math.random() + Math.random() - 2) // ~gaussian
+    for (let y = 0; y < gN; y++) for (let x = 0; x < gN; x++) for (let c = 0; c < 3; c++) {
+        let v = 0
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) v += gRaw[(((y + dy + gN) % gN) * gN + ((x + dx + gN) % gN)) * 3 + c] * (dx === 0 && dy === 0 ? 4 : dx === 0 || dy === 0 ? 2 : 1)
+        gData[(y * gN + x) * 4 + c] = Math.max(0, Math.min(255, 127.5 + (v / 16) * 150))
+    }
+    for (let i = 3; i < gData.length; i += 4) gData[i] = 255
+    d.grainTex = new THREE.DataTexture(gData, gN, gN)
+    d.grainTex.wrapS = d.grainTex.wrapT = THREE.RepeatWrapping; d.grainTex.minFilter = d.grainTex.magFilter = THREE.LinearFilter; d.grainTex.needsUpdate = true
+    d.grainMat = new THREE.ShaderMaterial({
+        depthTest: false, depthWrite: false,
+        uniforms: { tImg: { value: null }, tGrain: { value: d.grainTex }, uOff: { value: new THREE.Vector4() }, uAmt: { value: 0 }, uSize: { value: 1 } },
+        vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+        fragmentShader: [
+            "uniform sampler2D tImg; uniform sampler2D tGrain; uniform vec4 uOff; uniform float uAmt; uniform float uSize; varying vec2 vUv;",
+            "void main(){",
+            "  vec3 c = texture2D(tImg, vUv).rgb;",
+            "  vec2 p = gl_FragCoord.xy / (256.0 * uSize);",
+            "  vec3 g = (texture2D(tGrain, p + uOff.xy).rgb - 0.5) * 0.85 + (texture2D(tGrain, p * 0.61 + uOff.zw).gbr - 0.5) * 0.3;", // fine grain + larger clumps
+            "  g = mix(vec3(dot(g, vec3(0.3333))), g, 0.3);", // mostly luminance, a trace of colour
+            "  vec3 lin = c * c;", // display -> (about) linear light
+            "  float l = dot(lin, vec3(0.2126, 0.7152, 0.0722));",
+            "  float resp = 0.35 + 2.2 * sqrt(l) * (1.0 - 0.8 * l);", // film response: mid-tones grainiest
+            "  lin *= exp2(g * uAmt * resp * 2.0);", // noise in exposure
+            "  lin += g * uAmt * 0.02;", // base fog in the blacks
+            "  gl_FragColor = vec4(sqrt(max(lin, 0.0)), 1.0);",
+            "}",
+        ].join("\n"),
+    })
+    d.grainScene = new THREE.Scene()
+    d.grainScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), d.grainMat))
+    d.zero2 = new THREE.Vector2(); d.bufSize = new THREE.Vector2()
     // light bounced off the wall and the desk top
     d.bounce = new THREE.HemisphereLight(0xffffff, 0xffffff, 0)
     world.scene.add(d.bounce)
@@ -258,6 +298,20 @@ function deskApply(world: any, view: DeskView, tex: any): void {
     d.bounce.intensity = b ? b.intensity : 0
     if (b) { d.bounce.color.set(b.sky); d.bounce.groundColor.set(b.ground) }
     d.frame.visible = !!view.debugGrid
+    d.grainMat.uniforms.uAmt.value = view.grain ?? DESK_GRAIN
+    // the case shadows itself from the key light (map refreshed with the baked shadows, not every frame)
+    const { renderer, lights, THREE } = world
+    renderer.shadowMap.enabled = true; renderer.shadowMap.autoUpdate = false
+    lights.key.castShadow = true
+    const kp = view.lighting.key.position, kl = Math.hypot(kp[0], kp[1], kp[2]), sc = lights.key.shadow.camera
+    sc.left = -0.52; sc.right = 0.52; sc.top = 0.52; sc.bottom = -0.52; sc.near = Math.max(0.01, kl - 0.62); sc.far = kl + 0.62
+    sc.updateProjectionMatrix()
+    const ms = d.coarse ? 1024 : 2048
+    if (lights.key.shadow.mapSize.x !== ms) { lights.key.shadow.mapSize.set(ms, ms); lights.key.shadow.map?.dispose(); lights.key.shadow.map = null }
+    lights.key.shadow.bias = -0.0006; lights.key.shadow.normalBias = 0.004
+    // grade: lifts the case's blacks towards the photo's own darkest tone (as constant-density fog)
+    const gr = view.grade
+    if (gr && gr.amount > 0) { if (!world.scene.fog) world.scene.fog = new THREE.Fog(gr.color, 0, 1); world.scene.fog.color.set(gr.color) } else world.scene.fog = null
     // keep only this photograph on the GPU
     for (const [src, t] of d.textures) if (t !== tex) { t.dispose(); d.textures.delete(src) }
     d.tex = tex
@@ -285,6 +339,9 @@ function deskExit(world: any): void {
         d.envSaved = null
     }
     world.scene.environment = null
+    world.scene.fog = null
+    renderer.shadowMap.enabled = false; renderer.shadowMap.autoUpdate = true
+    world.lights.key.castShadow = false
     d.envKey = null; d.tex = null
     for (const [, t] of d.textures) t.dispose()
     d.textures.clear(); d.bgMat.uniforms.tMap.value = null; d.view = null
@@ -320,6 +377,11 @@ function deskCamera(world: any): void {
     camera.setViewOffset(W, H, x, y, w, h)
     d.bgMat.uniforms.uCrop.value.set(x / W, 1 - (y + h) / H, w / W, h / H)
     world.lightRig.rotation.y = -yaw
+    const fog = world.scene.fog
+    if (fog && v.grade) { // same density over the whole case: one huge ramp, the case sitting at the wanted point of it
+        const k = Math.min(0.6, Math.max(0, v.grade.amount)), t = 0.5 - Math.sin(Math.asin(1 - 2 * k) / 3) // inverse smoothstep
+        fog.near = camera.position.distanceTo(d.base) - t * 1e4; fog.far = fog.near + 1e4
+    }
     toModel([0, 0, 0], d.recv.position); d.recv.rotation.y = -yaw; d.recv.scale.setScalar(m)
     if (d.frame.visible) { d.frame.position.copy(d.recv.position); d.frame.rotation.y = -yaw; d.frame.scale.setScalar(m) }
 }
@@ -330,6 +392,7 @@ function deskBake(world: any): void {
     const d = world.desk, v: DeskView = d.view, box = world.caseBox
     if (!v || !box) return
     const { THREE, renderer, scene } = world
+    renderer.shadowMap.needsUpdate = true
     const y0 = box.min.y, m = world.rootScale / (v.product.scale || 1)
     const src = v.shadow.direction ?? v.lighting.key.position
     const L = new THREE.Vector3(-src[0], -src[1], -src[2]).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -deskYaw(d))
@@ -413,6 +476,20 @@ function deskRender(world: any): void {
     scene.background = null; world.sky.visible = false
     renderer.render(scene, camera)
     scene.background = bg; world.sky.visible = skyVis
+    if (d.grainMat.uniforms.uAmt.value > 0) {
+        renderer.getDrawingBufferSize(d.bufSize)
+        if (!d.frameTex || d.frameTex.image.width !== d.bufSize.x || d.frameTex.image.height !== d.bufSize.y) {
+            d.frameTex?.dispose()
+            d.frameTex = new world.THREE.FramebufferTexture(d.bufSize.x, d.bufSize.y)
+            d.frameTex.minFilter = d.frameTex.magFilter = world.THREE.NearestFilter
+            d.grainMat.uniforms.tImg.value = d.frameTex
+        }
+        renderer.copyFramebufferToTexture(d.zero2, d.frameTex)
+        const frame = Math.floor(performance.now() / 41.7)
+        if (frame !== d.grainFrame) { d.grainFrame = frame; d.grainMat.uniforms.uOff.value.set(Math.random(), Math.random(), Math.random(), Math.random()) }
+        d.grainMat.uniforms.uSize.value = Math.max(1, 0.7 * renderer.getPixelRatio() + 0.4)
+        renderer.render(d.grainScene, d.quadCam)
+    }
     renderer.autoClear = ac
 }
 
@@ -420,6 +497,7 @@ function deskDispose(world: any): void {
     const d = world.desk; if (!d) return
     for (const k of ["rawDir", "tight", "tmpA", "wide", "tmpB", "rawAO", "ao", "tmpC", "glow"]) d[k]?.dispose()
     for (const [, t] of d.textures) t.dispose()
+    d.grainTex.dispose(); d.grainMat.dispose(); d.frameTex?.dispose()
     d.bgMat.dispose(); d.shadowMat.dispose(); d.depthMat.dispose(); d.lightMat.dispose(); d.projMat.dispose(); d.blurMat.dispose(); d.recvGeo.dispose()
     d.scene.traverse((c: any) => { c.geometry?.dispose?.() })
     world.desk = null

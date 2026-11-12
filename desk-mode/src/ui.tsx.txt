@@ -45,7 +45,7 @@ const DESK_CAL_FIELDS: Array<[string, number]> = [
     ["lighting.ambient.intensity", 0.05], ["lighting.key.intensity", 0.1],
     ["lighting.key.position.0", 0.1], ["lighting.key.position.1", 0.1], ["lighting.key.position.2", 0.1],
     ["lighting.fill.intensity", 0.05], ["lighting.rim.intensity", 0.05], ["lighting.bounce.intensity", 0.05], ["lighting.ibl", 0.05],
-    ["shadow.opacity", 0.02], ["shadow.softness", 0.05], ["shadow.contact", 0.02], ["shadow.glow", 0.02], ["shadow.maxLength", 0.05],
+    ["shadow.opacity", 0.02], ["shadow.softness", 0.05], ["shadow.contact", 0.02], ["shadow.glow", 0.02], ["shadow.maxLength", 0.05], ["grade.amount", 0.01], ["grain", 0.05],
     ["shadow.direction.0", 0.05], ["shadow.direction.1", 0.05], ["shadow.direction.2", 0.05],
 ]
 function deskGet(o: any, path: string): any { return path.split(".").reduce((a, k) => (a == null ? a : a[k]), o) }
