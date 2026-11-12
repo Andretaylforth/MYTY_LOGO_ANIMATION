@@ -22,11 +22,18 @@ interface DeskView {
         ambient: { color: number; intensity: number }
         key: DeskLight; fill: DeskLight; rim: DeskLight
         bounce?: { sky: number; ground: number; intensity: number } // light off the wall (sky) and the desk (ground)
+        // image-based light: how strongly the photograph itself (wrapped round the case, plus the key and fill
+        // lights as bright panels) lights every surface of the case. 0 / unset = aluminium reflections only.
+        ibl?: number
     }
     // shadow catcher: colour + strength of the cast shadow, how soft it gets away from the case,
     // strength of the contact shadow under it. direction overrides the key light's.
     // glow = how much of its own colour the case throws back onto the desk round its foot (0 = none).
-    shadow: { color: number; opacity: number; softness: number; contact: number; direction?: DeskV3; glow?: number }
+    // maxLength (metres) = how far behind the case the cast shadow reaches before it fades out.
+    shadow: { color: number; opacity: number; softness: number; contact: number; direction?: DeskV3; glow?: number; maxLength?: number }
+    // shadow catchers: the surfaces in the photo the shadow can land on, as boxes [minX, minY, minZ, maxX, maxY, maxZ]
+    // in desk space (a wall is just a thin box). Unset = one big desk top at y = 0.
+    receivers?: number[][]
     portrait?: Partial<DeskView> // overrides for tall (phone) viewers, e.g. a separate portrait photograph
     debugGrid?: boolean
 }
@@ -94,21 +101,29 @@ const DESK_ENVIRONMENTS: DeskEnvironment[] = [
           framing: { focus: [0.5, 0.52], narrowZoom: 1 },
           lighting: DESK_LIGHT_03, shadow: { color: 0x1a0f08, opacity: 0.62, softness: 0.95, contact: 0.7, direction: [2.0, 1.5, 0.9] } },
     ] },
-    // Night desk: one lamp from behind-left of the case, very long lens. The camera was solved from the
-    // reference render of the case on this desk; the case stands at the origin of this view's desk space.
+    // Office cubicle: the case stands on the raised shelf. Soft overhead room light, a warm floor lamp to the
+    // right, teal fabric panels behind. Camera solved from the mock-up of the case on this shelf; desk space
+    // here has its origin under the case, x along the shelf, z towards the camera side of the desk.
     { id: "04", name: "Environment 04", views: [
-        { id: "A", label: "View A", image: deskPlate("env04a", 2000, 1333),
-          camera: { position: [-3.2966, 1.5398, 5.77], target: [-1.0318, 0.6011, 1.81], fov: 9.11 },
+        { id: "A", label: "View A", image: deskPlate("env04a", 2000, 1342),
+          camera: { position: [1.0326, 2.3801, 5.9629], target: [-0.2682, -0.3155, -0.6668], fov: 16.01 },
           product: { position: [0, 0], rotationY: 0, scale: 1 },
-          framing: { focus: [0.5, 0.5] },
+          framing: { focus: [0.551, 0.5], narrowZoom: 1.14 },
+          portrait: { framing: { focus: [0.551, 0.56], narrowZoom: 1.14 } },
           lighting: {
-              ambient: { color: 0xa9b6cc, intensity: 0.32 },
-              key: { color: 0xfff0dc, intensity: 3.2, position: [0.1, 1.0, -0.75] },
-              fill: { color: 0xc4d0e6, intensity: 0.42, position: [-0.5, 0.45, 0.85] },
-              rim: { color: 0xfff0dc, intensity: 0.5, position: [-1.2, 0.8, -0.4] },
-              bounce: { sky: 0x39424f, ground: 0xf2e8d8, intensity: 0.8 },
+              ambient: { color: 0xd3e2e6, intensity: 0.3 },
+              key: { color: 0xffe3b8, intensity: 1.5, position: [1.04, 0.3, -0.07] },    // the floor lamp
+              fill: { color: 0xe9f0f4, intensity: 1.25, position: [-0.3, 1.5, 1.1] },    // overhead room light
+              rim: { color: 0x2f8794, intensity: 0.55, position: [-0.35, 0.25, -1] },    // teal off the back panels
+              bounce: { sky: 0x6f9aa3, ground: 0xeef0f0, intensity: 0.6 },
+              ibl: 0.7,
           },
-          shadow: { color: 0x07090d, opacity: 0.82, softness: 0.3, contact: 0.8, direction: [0.1, 1.0, -0.75], glow: 0.5 } },
+          shadow: { color: 0x0c1418, opacity: 0.62, softness: 0.5, contact: 0.78, direction: [1.0, 0.7, 0.03], glow: 0.35, maxLength: 0.8 },
+          receivers: [
+              [-0.49, -0.022, -0.15, 0.74, 0, 0.07],      // the raised shelf
+              [-0.6, -0.09, -0.15, 0.85, -0.062, 0.4],    // the desk top under it
+              [-0.36, -0.9, -0.17, 1.6, 1.2, -0.15],      // the fabric panel straight behind (the left one is angled away)
+          ] },
     ] },
 ]
 
